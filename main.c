@@ -59,19 +59,19 @@ int main(int argc, char **argv)
 	env = env_create(nil);
 
 	/* Set up the initial environment */
-	env_set(env, make_sym("CAR"), make_builtin(builtin_car));
-	env_set(env, make_sym("CDR"), make_builtin(builtin_cdr));
-	env_set(env, make_sym("CONS"), make_builtin(builtin_cons));
-	env_set(env, make_sym("+"), make_builtin(builtin_add));
-	env_set(env, make_sym("-"), make_builtin(builtin_subtract));
-	env_set(env, make_sym("*"), make_builtin(builtin_multiply));
-	env_set(env, make_sym("/"), make_builtin(builtin_divide));
-	env_set(env, make_sym("T"), make_sym("T"));
-	env_set(env, make_sym("="), make_builtin(builtin_numeq));
-	env_set(env, make_sym("<"), make_builtin(builtin_less));
-	env_set(env, make_sym("EQ?"), make_builtin(builtin_eq));
-	env_set(env, make_sym("PAIR?"), make_builtin(builtin_pairp));
-	env_set(env, make_sym("PROCEDURE?"), make_builtin(builtin_procp));
+	env_define(env, make_sym("CAR"), make_builtin(builtin_car));
+	env_define(env, make_sym("CDR"), make_builtin(builtin_cdr));
+	env_define(env, make_sym("CONS"), make_builtin(builtin_cons));
+	env_define(env, make_sym("+"), make_builtin(builtin_add));
+	env_define(env, make_sym("-"), make_builtin(builtin_subtract));
+	env_define(env, make_sym("*"), make_builtin(builtin_multiply));
+	env_define(env, make_sym("/"), make_builtin(builtin_divide));
+	env_define(env, make_sym("T"), make_sym("T"));
+	env_define(env, make_sym("="), make_builtin(builtin_numeq));
+	env_define(env, make_sym("<"), make_builtin(builtin_less));
+	env_define(env, make_sym("EQ?"), make_builtin(builtin_eq));
+	env_define(env, make_sym("PAIR?"), make_builtin(builtin_pairp));
+	env_define(env, make_sym("PROCEDURE?"), make_builtin(builtin_procp));
 
 	load_file(env, "library.lisp");
 

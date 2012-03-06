@@ -1,4 +1,5 @@
 #include "lisp.h"
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,6 +96,22 @@ Atom copy_list(Atom list)
 	}
 
 	return a;
+}
+
+Atom list_create(int n, ...)
+{
+	va_list ap;
+	Atom list = nil;
+
+	va_start(ap, n);
+	while (n--) {
+		Atom item = va_arg(ap, Atom);
+		list = cons(item, list);
+	}
+	va_end(ap);
+
+	list_reverse(&list);
+	return list;
 }
 
 Atom list_get(Atom list, int k)

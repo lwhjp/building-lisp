@@ -52,6 +52,7 @@ void print_expr(Atom atom);
 /* EVALUATOR */
 
 Atom env_create(Atom parent);
+int env_define(Atom env, Atom symbol, Atom value);
 int env_get(Atom env, Atom symbol, Atom *result);
 int env_set(Atom env, Atom symbol, Atom value);
 int eval_expr(Atom expr, Atom env, Atom *result);
@@ -64,6 +65,7 @@ Atom make_sym(const char *s);
 Atom make_builtin(Builtin fn);
 int listp(Atom expr);
 Atom copy_list(Atom list);
+Atom list_create(int n, ...);
 Atom list_get(Atom list, int k);
 void list_set(Atom list, int k, Atom value);
 void list_reverse(Atom *list);

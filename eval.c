@@ -6,6 +6,24 @@ Atom env_create(Atom parent)
 	return cons(parent, nil);
 }
 
+int env_define(Atom env, Atom symbol, Atom value)
+{
+	Atom bs = cdr(env);
+
+	while (!nilp(bs)) {
+		Atom b = car(bs);
+		if (car(b).value.symbol == symbol.value.symbol) {
+			cdr(b) = value;
+			return Error_OK;
+		}
+		bs = cdr(bs);
+	}
+
+	cdr(env) = cons(cons(symbol, value), cdr(env));
+
+	return Error_OK;
+}
+
 int env_get(Atom env, Atom symbol, Atom *result)
 {
 	Atom parent = car(env);
@@ -28,11 +46,11 @@ int env_get(Atom env, Atom symbol, Atom *result)
 
 int env_set(Atom env, Atom symbol, Atom value)
 {
+	Atom parent = car(env);
 	Atom bs = cdr(env);
-	Atom b = nil;
 
 	while (!nilp(bs)) {
-		b = car(bs);
+		Atom b = car(bs);
 		if (car(b).value.symbol == symbol.value.symbol) {
 			cdr(b) = value;
 			return Error_OK;
@@ -40,10 +58,10 @@ int env_set(Atom env, Atom symbol, Atom value)
 		bs = cdr(bs);
 	}
 
-	b = cons(symbol, value);
-	cdr(env) = cons(b, cdr(env));
+	if (nilp(parent))
+		return Error_Unbound;
 
-	return Error_OK;
+	return env_set(parent, symbol, value);
 }
 
 int make_closure(Atom env, Atom args, Atom body, Atom *result)
@@ -119,14 +137,14 @@ int eval_do_bind(Atom *stack, Atom *expr, Atom *env)
 	/* Bind the arguments */
 	while (!nilp(arg_names)) {
 		if (arg_names.type == AtomType_Symbol) {
-			env_set(*env, arg_names, args);
+			env_define(*env, arg_names, args);
 			args = nil;
 			break;
 		}
 
 		if (nilp(args))
 			return Error_Args;
-		env_set(*env, car(arg_names), car(args));
+		env_define(*env, car(arg_names), car(args));
 		arg_names = cdr(arg_names);
 		args = cdr(args);
 	}
@@ -207,7 +225,7 @@ int eval_do_return(Atom *stack, Atom *expr, Atom *env, Atom *result)
 		/* Finished working on special form */
 		if (strcmp(op.value.symbol, "DEFINE") == 0) {
 			Atom sym = list_get(*stack, 4);
-			(void) env_set(*env, sym, *result);
+			(void) env_define(*env, sym, *result);
 			*stack = car(*stack);
 			*expr = cons(make_sym("QUOTE"), cons(sym, nil));
 			return Error_OK;
@@ -288,7 +306,7 @@ int eval_expr(Atom expr, Atom env, Atom *result)
 						sym = car(sym);
 						if (sym.type != AtomType_Symbol)
 							return Error_Type;
-						(void) env_set(env, sym, *result);
+						(void) env_define(env, sym, *result);
 						*result = sym;
 					} else if (sym.type == AtomType_Symbol) {
 						if (!nilp(cdr(cdr(args))))
@@ -333,7 +351,7 @@ int eval_expr(Atom expr, Atom env, Atom *result)
 					if (!err) {
 						macro.type = AtomType_Macro;
 						*result = name;
-						(void) env_set(env, name, macro);
+						(void) env_define(env, name, macro);
 					}
 				} else if (strcmp(op.value.symbol, "APPLY") == 0) {
 					if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
