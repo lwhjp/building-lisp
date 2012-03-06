@@ -229,6 +229,11 @@ int eval_do_return(Atom *stack, Atom *expr, Atom *env, Atom *result)
 			*stack = car(*stack);
 			*expr = cons(make_sym("QUOTE"), cons(sym, nil));
 			return Error_OK;
+		} else if (strcmp(op.value.symbol, "SET!") == 0) {
+			Atom sym = list_get(*stack, 4);
+			*stack = car(*stack);
+			*expr = cons(make_sym("QUOTE"), cons(sym, nil));
+			return env_set(*env, sym, *result);
 		} else if (strcmp(op.value.symbol, "IF") == 0) {
 			args = list_get(*stack, 3);
 			*expr = nilp(*result) ? car(cdr(args)) : car(args);
@@ -360,6 +365,16 @@ int eval_expr(Atom expr, Atom env, Atom *result)
 					stack = make_frame(stack, env, cdr(args));
 					list_set(stack, 2, op);
 					expr = car(args);
+					continue;
+				} else if (strcmp(op.value.symbol, "SET!") == 0) {
+					if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+						return Error_Args;
+					if (car(args).type != AtomType_Symbol)
+						return Error_Type;
+					stack = make_frame(stack, env, nil);
+					list_set(stack, 2, op);
+					list_set(stack, 4, car(args));
+					expr = car(cdr(args));
 					continue;
 				} else {
 					goto push;
