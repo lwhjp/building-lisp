@@ -1,0 +1,205 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 9: Syntactic sugar</title>
+</head>
+<body>
+
+<h1>Syntactic sugar</h1>
+
+<p>
+We will define some additional syntax to facilitate entry of some common
+expressions. Recall that we already allow the user to enter
+<pre class="lisp">
+(A B C)
+</pre>
+instead of
+<pre class="lisp">
+(A . (B . (C . NIL)))
+</pre>
+</p>
+
+<h2>Quoting</h2>
+
+<p>
+In order to include a literal symbol or list in an expression, we need
+to use the <code>QUOTE</code> operator. As a shortcut, we will
+define
+<pre class="lisp">
+'EXPR
+</pre>
+to be equivalent to
+<pre class="lisp">
+(QUOTE EXPR)
+</pre>
+</p>
+
+<p>
+So for example the following forms are equivalent:
+<table border="1">
+  <tr>
+    <th>Abbreviation</th> <th>Canonical form</th> <th>Evaluates to</th>
+  <tr>
+    <td><code>'FOO</code></td>
+    <td><code>(QUOTE FOO)</code></td>
+    <td><code>FOO</code></td>
+  </tr>
+  <tr>
+    <td><code>'(+ 1 2)</code></td>
+    <td><code>(QUOTE (+ 1 2))</code></td>
+    <td><code>(+ 1 2)</code></td>
+  </tr>
+  <tr>
+    <td><code>'(A . B)</code></td>
+    <td><code>(QUOTE (A . B))</code></td>
+    <td><code>(A . B)</code></td>
+  </tr>
+</table>
+</p>
+
+<p>
+The lexer needs to know that the quote mark is a prefix (i.e., it can
+appear immediately before another token but is not necessarily a
+delimeter).
+<pre class="c">
+int lex(const char *str, const char **start, const char **end)
+{
+	const char *ws = " \t\n";
+	const char *delim = "() \t\n";
+	const char *prefix = "()<b>\'</b>";
+	.
+	.
+	.
+}
+</pre>
+</p>
+
+<p>
+Also <code>read_expr</code> must convert it to the correct list
+expresssion.
+</p>
+
+<pre class="c">
+int read_expr(const char *input, const char **end, Atom *result)
+{
+	const char *token;
+	Error err;
+
+	err = lex(input, &amp;token, end);
+	if (err)
+		return err;
+
+	if (token[0] == '(') {
+		return read_list(*end, end, result);
+	} else if (token[0] == ')') {
+		return Error_Syntax;
+	<b>} else if (token[0] == '\'') {
+		*result = cons(make_sym("QUOTE"), cons(nil, nil));
+		return read_expr(*end, end, &amp;car(cdr(*result)));</b>
+	} else {
+		return parse_simple(token, *end, result);
+	}
+}
+</pre>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(define x '(a b c))</b>
+X
+&gt; <b>x</b>
+(A B C)
+&gt; <b>'x</b>
+X
+&gt; <b>(define foo 'bar)</b>
+FOO
+&gt; <b>foo</b>
+BAR
+&gt; <b>''()</b>
+(QUOTE NIL)
+</pre>
+
+<h2>Function definitions</h2>
+
+<p>
+It is cumbersome to have to type a lambda expression every time we wish
+to define a function, so we will modify the <code>DEFINE</code> operator
+to avoid this.
+<pre class="lisp">
+(DEFINE (<i>name args...</i>) <i>body...</i>)
+</pre>
+is equivalent to
+<pre class="lisp">
+(DEFINE <i>name</i> (LAMBDA (<i>args...</i>) <i>body...</i>))
+</pre>
+</p>
+
+<p>
+Here's how:
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	.
+	.
+	.
+	if (op.type == AtomType_Symbol) {
+		if (strcmp(op.value.symbol, "QUOTE") == 0) {
+		.
+		.
+		.
+		} else if (strcmp(op.value.symbol, "DEFINE") == 0) {
+			Atom sym, val;
+
+			if (nilp(args) || nilp(cdr(args)))
+				return Error_Args;
+
+			sym = car(args);
+			if (sym.type == AtomType_Pair) {
+				err = make_closure(env, cdr(sym), cdr(args), &val);
+				sym = car(sym);
+				if (sym.type != AtomType_Symbol)
+					return Error_Type;
+			} else if (sym.type == AtomType_Symbol) {
+				if (!nilp(cdr(cdr(args))))
+					return Error_Args;
+				err = eval_expr(car(cdr(args)), env, &val);
+			} else {
+				return Error_Type;
+			}
+
+			if (err)
+				return err;
+
+			*result = sym;
+			return env_set(env, sym, val);
+		} else if (strcmp(op.value.symbol, "LAMBDA") == 0) {
+		.
+		.
+		.
+		}
+	}
+	.
+	.
+	.
+}
+</pre>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(define (square x) (* x x))</b>
+SQUARE
+&gt; <b>(square 3)</b>
+9
+</pre>
+
+<p>
+Sweet!
+</p>
+
+</body>
+</html>
+

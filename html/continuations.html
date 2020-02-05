@@ -1,0 +1,529 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 14: Continuations and tail recursion</title>
+</head>
+<body>
+
+<i>
+<strong>NOTE</strong> The implementation of <code>eval_expr</code>
+and the design of the stack in this chapter are rather ad-hoc, and
+I'm not particularly proud of them. Please skip to the next chapter
+if they offend you.
+</i>
+
+<h1>Continuations and tail recursion</h1>
+
+<p>
+Our <code>eval_expr</code> function has been implemented recursively
+&mdash; that is to say, when in the course of evaluating an expression
+it is necessary to evaluate a sub-expression, <code>eval_expr</code>
+calls itself to obtain the result.
+</p>
+
+<p>
+This works fairly well, and is easy to follow, but the depth of
+recursion in our LISP environment is limited by the stack size of the
+interpreter. LISP code traditionally makes heavy use of recursion,
+and we would like to support this up to the limit of available memory.
+</p>
+
+<p>
+Take the following pathological example:
+<pre class="lisp">
+(define (count n)
+  (if (= n 0)
+      0
+      (+ 1 (count (- n 1)))))
+</pre>
+</p>
+
+<p>
+The <code>COUNT</code> function will recurse to depth <code>n</code>
+and return the sum of <code>n</code> ones. Expressions such as
+<code>(COUNT 10)</code> should compute OK with our current interpreter,
+but even <code>(COUNT 10000)</code> is enough to cause a stack overflow
+on my machine.
+</p>
+
+<p>
+To achieve this we will rewrite <code>eval_expr</code> as a loop, with
+helper functions to keep track of evaluations in progress and return
+the next expression to be evaluated. When there are no more expressions
+left, <code>eval_expr</code> can return the final result to the caller.
+</p>
+
+<p>
+As <code>eval_expr</code> works through the tree of expressions, we will
+keep track of arguments evaluated and pending evaluation in a series of
+<code>frames</code>, linked together to form a <code>stack</code>. This
+is broadly the same way that the compiled version of the recursive
+<code>eval_expr</code> works; in this case we are replacing the machine
+code stack with a LISP data structure and manipulating it explicitly.
+</p>
+
+<p>
+The stack can also be thought of as representing the future of the
+computation once the present expression has been evaluated. In this
+sense it is referred to as the current <i>continuation</i>.
+</p>
+
+<p>
+Since any function which is called by <code>eval_expr</code> may not
+call <code>eval_expr</code> (to avoid recursion), we must integrate
+<code>apply</code> and <code>builtin_apply</code> into the body of
+<code>eval_expr</code>.
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+A stack frame has the following form.
+</p>
+
+<pre class="lisp">
+(<i>parent env evaluated-op</i> (<i>pending-arg...</i>) (<i>evaluated-arg...</i>) (<i>body...</i>))
+</pre>
+
+<p>
+<code>parent</code> is the stack frame corresponding to the parent
+expression (that is, the one which is waiting for the result of the
+current expression). <code>env</code> is the current environment,
+<code>evaluated-op</code> is the evaluated operator, and
+<code>pending-arg...</code> and <code>evaluated-arg</code> are the
+arguments pending and following evaluation respectively.
+<code>body...</code> are the expressions in the function body
+which are pending execution.
+</p>
+
+<p>
+Rather than writing out long lists of <code>car()</code> and
+<code>cdr()</code>, we will define some helper functions to
+manipulate members of a list.
+</p>
+
+<pre class="c">
+Atom list_get(Atom list, int k)
+{
+	while (k--)
+		list = cdr(list);
+	return car(list);
+}
+
+void list_set(Atom list, int k, Atom value)
+{
+	while (k--)
+		list = cdr(list);
+	car(list) = value;
+}
+
+void list_reverse(Atom *list)
+{
+	Atom tail = nil;
+	while (!nilp(*list)) {
+		Atom p = cdr(*list);
+		cdr(*list) = tail;
+		tail = *list;
+		*list = p;
+	}
+	*list = tail;
+}
+</pre>
+
+<p>
+Another function creates a new stack frame ready to start evaluating a
+new function call, with the specified parent, environment and list of
+arguments pending evaluation (the <i>tail</i>).
+</p>
+
+<pre class="c">
+Atom make_frame(Atom parent, Atom env, Atom tail)
+{
+	return cons(parent,
+		cons(env,
+		cons(nil, /* op */
+		cons(tail,
+		cons(nil, /* args */
+		cons(nil, /* body */
+		nil))))));
+}
+</pre>
+
+<p>
+Here is the innermost part of our new <code>exec_expr</code>,
+which sets <code>expr</code> to the next part of the function
+body, and pops the stack when we have reached end of the body.
+</p>
+
+<pre class="c">
+int eval_do_exec(Atom *stack, Atom *expr, Atom *env)
+{
+	Atom body;
+
+	*env = list_get(*stack, 1);
+	body = list_get(*stack, 5);
+	*expr = car(body);
+	body = cdr(body);
+	if (nilp(body)) {
+		/* Finished function; pop the stack */
+		*stack = car(*stack);
+	} else {
+		list_set(*stack, 5, body);
+	}
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+This helper binds the function arguments into a new environment
+if they have not already been bound, then calls
+<code>eval_do_exec</code> to get the next expression in the body.
+</p>
+
+<pre class="c">
+int eval_do_bind(Atom *stack, Atom *expr, Atom *env)
+{
+	Atom op, args, arg_names, body;
+
+	body = list_get(*stack, 5);
+	if (!nilp(body))
+		return eval_do_exec(stack, expr, env);
+
+	op = list_get(*stack, 2);
+	args = list_get(*stack, 4);
+
+	*env = env_create(car(op));
+	arg_names = car(cdr(op));
+	body = cdr(cdr(op));
+	list_set(*stack, 1, *env);
+	list_set(*stack, 5, body);
+
+	/* Bind the arguments */
+	while (!nilp(arg_names)) {
+		if (arg_names.type == AtomType_Symbol) {
+			env_set(*env, arg_names, args);
+			args = nil;
+			break;
+		}
+
+		if (nilp(args))
+			return Error_Args;
+		env_set(*env, car(arg_names), car(args));
+		arg_names = cdr(arg_names);
+		args = cdr(args);
+	}
+	if (!nilp(args))
+		return Error_Args;
+
+	list_set(*stack, 4, nil);
+
+	return eval_do_exec(stack, expr, env);
+}
+</pre>
+
+<p>
+The next function is called once all arguments have been evaluated,
+and is responsible either generating an expression to call a builtin,
+or delegating to <code>eval_do_bind</code>.
+</p>
+
+<pre class="c">
+int eval_do_apply(Atom *stack, Atom *expr, Atom *env, Atom *result)
+{
+	Atom op, args;
+
+	op = list_get(*stack, 2);
+	args = list_get(*stack, 4);
+
+	if (!nilp(args)) {
+		list_reverse(&amp;args);
+		list_set(*stack, 4, args);
+	}
+
+	if (op.type == AtomType_Symbol) {
+		if (strcmp(op.value.symbol, "APPLY") == 0) {
+			/* Replace the current frame */
+			*stack = car(*stack);
+			*stack = make_frame(*stack, *env, nil);
+			op = car(args);
+			args = car(cdr(args));
+			if (!listp(args))
+				return Error_Syntax;
+
+			list_set(*stack, 2, op);
+			list_set(*stack, 4, args);
+		}
+	}
+
+	if (op.type == AtomType_Builtin) {
+		*stack = car(*stack);
+		*expr = cons(op, args);
+		return Error_OK;
+	} else if (op.type != AtomType_Closure) {
+		return Error_Type;
+	}
+
+	return eval_do_bind(stack, expr, env);
+}
+</pre>
+
+<p>
+This part is called once an expression has been evaluated, and
+is responsible for storing the result, which is either an operator,
+an argument, or an intermediate body expression, and fetching the
+next expression to evaluate.
+</p>
+
+<pre class="c">
+int eval_do_return(Atom *stack, Atom *expr, Atom *env, Atom *result)
+{
+	Atom op, args, body;
+
+	*env = list_get(*stack, 1);
+	op = list_get(*stack, 2);
+	body = list_get(*stack, 5);
+
+	if (!nilp(body)) {
+		/* Still running a procedure; ignore the result */
+		return eval_do_apply(stack, expr, env, result);
+	}
+
+	if (nilp(op)) {
+		/* Finished evaluating operator */
+		op = *result;
+		list_set(*stack, 2, op);
+
+		if (op.type == AtomType_Macro) {
+			/* Don't evaluate macro arguments */
+			args = list_get(*stack, 3);
+			*stack = make_frame(*stack, *env, nil);
+			op.type = AtomType_Closure;
+			list_set(*stack, 2, op);
+			list_set(*stack, 4, args);
+			return eval_do_bind(stack, expr, env);
+		}
+	} else if (op.type == AtomType_Symbol) {
+		/* Finished working on special form */
+		if (strcmp(op.value.symbol, "DEFINE") == 0) {
+			Atom sym = list_get(*stack, 4);
+			(void) env_set(*env, sym, *result);
+			*stack = car(*stack);
+			*expr = cons(make_sym("QUOTE"), cons(sym, nil));
+			return Error_OK;
+		} else if (strcmp(op.value.symbol, "IF") == 0) {
+			args = list_get(*stack, 3);
+			*expr = nilp(*result) ? car(cdr(args)) : car(args);
+			*stack = car(*stack);
+			return Error_OK;
+		} else {
+			goto store_arg;
+		}
+	} else if (op.type == AtomType_Macro) {
+		/* Finished evaluating macro */
+		*expr = *result;
+		*stack = car(*stack);
+		return Error_OK;
+	} else {
+	store_arg:
+		/* Store evaluated argument */
+		args = list_get(*stack, 4);
+		list_set(*stack, 4, cons(*result, args));
+	}
+
+	args = list_get(*stack, 3);
+	if (nilp(args)) {
+		/* No more arguments left to evaluate */
+		return eval_do_apply(stack, expr, env, result);
+	}
+
+	/* Evaluate next argument */
+	*expr = car(args);
+	list_set(*stack, 3, cdr(args));
+	return Error_OK;
+}
+</pre>
+
+<p>
+And here we are at last with the new <code>eval_expr</code>. There
+is a lot of code for setting up special forms, but the rest is simply
+a loop waiting for the stack to clear.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	Error err = Error_OK;
+	Atom stack = nil;
+
+	do {
+		if (expr.type == AtomType_Symbol) {
+			err = env_get(env, expr, result);
+		} else if (expr.type != AtomType_Pair) {
+			*result = expr;
+		} else if (!listp(expr)) {
+			return Error_Syntax;
+		} else {
+			Atom op = car(expr);
+			Atom args = cdr(expr);
+
+			if (op.type == AtomType_Symbol) {
+				/* Handle special forms */
+
+				if (strcmp(op.value.symbol, "QUOTE") == 0) {
+					if (nilp(args) || !nilp(cdr(args)))
+						return Error_Args;
+
+					*result = car(args);
+				} else if (strcmp(op.value.symbol, "DEFINE") == 0) {
+					Atom sym;
+
+					if (nilp(args) || nilp(cdr(args)))
+						return Error_Args;
+
+					sym = car(args);
+					if (sym.type == AtomType_Pair) {
+						err = make_closure(env, cdr(sym), cdr(args), result);
+						sym = car(sym);
+						if (sym.type != AtomType_Symbol)
+							return Error_Type;
+						(void) env_set(env, sym, *result);
+						*result = sym;
+					} else if (sym.type == AtomType_Symbol) {
+						if (!nilp(cdr(cdr(args))))
+							return Error_Args;
+						stack = make_frame(stack, env, nil);
+						list_set(stack, 2, op);
+						list_set(stack, 4, sym);
+						expr = car(cdr(args));
+						continue;
+					} else {
+						return Error_Type;
+					}
+				} else if (strcmp(op.value.symbol, "LAMBDA") == 0) {
+					if (nilp(args) || nilp(cdr(args)))
+						return Error_Args;
+
+					err = make_closure(env, car(args), cdr(args), result);
+				} else if (strcmp(op.value.symbol, "IF") == 0) {
+					if (nilp(args) || nilp(cdr(args)) || nilp(cdr(cdr(args)))
+							|| !nilp(cdr(cdr(cdr(args)))))
+						return Error_Args;
+
+					stack = make_frame(stack, env, cdr(args));
+					list_set(stack, 2, op);
+					expr = car(args);
+					continue;
+				} else if (strcmp(op.value.symbol, "DEFMACRO") == 0) {
+					Atom name, macro;
+
+					if (nilp(args) || nilp(cdr(args)))
+						return Error_Args;
+
+					if (car(args).type != AtomType_Pair)
+						return Error_Syntax;
+
+					name = car(car(args));
+					if (name.type != AtomType_Symbol)
+						return Error_Type;
+
+					err = make_closure(env, cdr(car(args)),
+						cdr(args), &amp;macro);
+					if (!err) {
+						macro.type = AtomType_Macro;
+						*result = name;
+						(void) env_set(env, name, macro);
+					}
+				} else if (strcmp(op.value.symbol, "APPLY") == 0) {
+					if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+						return Error_Args;
+
+					stack = make_frame(stack, env, cdr(args));
+					list_set(stack, 2, op);
+					expr = car(args);
+					continue;
+				} else {
+					goto push;
+				}
+			} else if (op.type == AtomType_Builtin) {
+				err = (*op.value.builtin)(args, result);
+			} else {
+			push:
+				/* Handle function application */
+				stack = make_frame(stack, env, args);
+				expr = op;
+				continue;
+			}
+		}
+
+		if (nilp(stack))
+			break;
+
+		if (!err)
+			err = eval_do_return(&amp;stack, &amp;expr, &amp;env, result);
+	} while (!err);
+
+	return err;
+}
+</pre>
+
+<h4>Testing</h4>
+
+<p>
+Let's try our <code>COUNT</code> function again.
+</p>
+
+<pre class="lisp">
+&gt; <b>(count 100000)</b>
+100000
+</pre>
+
+<p>
+Hooray! We can now recurse as much as we like without causing a stack
+overflow. If you have a lot of RAM, you should even be able to do
+a million levels deep.
+</p>
+
+<h2>Tail recursion</h2>
+
+<p>
+If the last expression in a function is a call to another function, then
+the result can be returned directly to the first function's caller. This
+is known as a <i>tail call</i>. If the called function, through a series
+of tail calls, causes the first function to be called, we have
+<i>tail recursion</i>.
+</p>
+
+<p>
+Tail calls do not require the caller's stack frame to be retained, so
+a tail-recursive function can recurse as many levels as necessary without
+increasing the stack depth.
+</p>
+
+<p>
+The <code>count</code> function could be formulated as a tail-recursive
+procedure as follows:
+<pre class="lisp">
+(define (count n a)
+  (if (= n 0)
+      a
+      (count (- n 1) (+ a 1))))
+
+(count 100000 0)
+</pre>
+</p>
+
+<p>
+If you watch <code>eval_expr</code> with a debugger you can confirm that
+the stack never grows above a few levels deep.
+</p>
+
+<p>
+All that is left to do is clean up all the temporary objects created
+by our new evaluator.
+</p>
+
+</body>
+</html>
+

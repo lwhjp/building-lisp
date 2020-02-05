@@ -1,0 +1,95 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 1: Introduction</title>
+</head>
+<body>
+
+<h1>Introduction</h1>
+
+<p>
+The best way to understand how something works is to try to build it
+for yourself. Reading somebody else's explanation might satisfy your
+curiosity, but without the experience of falling into all the little
+traps it is difficult to get a feel for <em>why</em> something is
+designed a certain way.
+</p>
+
+<p>
+It's been said that every would-be programmer should write a compiler.
+While I think this is good advice (although I haven't followed it myself),
+there is so much effort involved just in parsing a language such as C
+that any potential insights risk getting lost in a mire of details.
+Perhaps creating an interpreter for some simple language would be a good
+first step.
+</p>
+
+<p>
+I first started playing around with LISP a good few years ago, yet much
+later than I should have. This led me to the classic lecture series
+<a href="http://groups.csail.mit.edu/mac/classes/6.001/abelson-sussman-lectures/">
+Structure and Interpretation of Computer Programs</a>. If you have the
+next 24 hours free and haven't seen the videos already, go watch them now.
+</p>
+
+<p>
+The course covers many topics, but the second half shows in detail how
+to evaluate LISP, first by implementing a simple version of
+<code>eval</code> in LISP itself. I figured that this would translate
+well into C, and so decided to try creating my own implementation
+of LISP.
+</p>
+
+<p>
+It was really easy.
+</p>
+
+<p>
+This article is an attempt to share the process by which I built my
+implementation, and the chapters occur roughly in the order in which I
+did things. Why not follow along and create your own version in your
+language of choice?<a href="#f1"><sup>*</sup></a>
+</p>
+
+<p>
+As a professional programmer <small>(ha, ha)</small>, I spend the majority
+of my time writing C and C++. Most of the rest is Java. There are many
+languages out there, each with their own debatable merits, but I'd like
+to demonstrate just how simple a LISP machine can be &mdash; even built
+in as low-level a language as C. See John McCarthy's
+<a href="http://www-formal.stanford.edu/jmc/history/lisp/lisp.html">
+History of LISP</a> for the story of the pioneers.
+</p>
+
+<p>
+So here is my toy implementation of LISP. I've borrowed features from
+various dialects, but it's closer to Scheme than Common LISP. The
+differences are trivial enough that changing over would not require
+substantial changes to the interpreter. Don't worry if you're not familiar
+with LISP; I will define everything as I go along.
+</p>
+
+<p>
+It is not meant to be the smallest possible implementation, nor the
+most efficient, nor the most complete; it could however be described as
+lazy. My goal was to write robust, easy-to-read code that does exactly
+what it needs to, and no more, and I hope that it conveys how little
+effort is required to construct an incredibly powerful environment like LISP.
+</p>
+
+<hr />
+
+<small>
+
+<p id="f1">
+<sup>*</sup> If you are using a fancy language which supports something like
+<code>eval</code>, it would be cool to expose the native datatypes to
+the LISP environment.
+</p>
+
+</small>
+
+</body>
+</html>
+

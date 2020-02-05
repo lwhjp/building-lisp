@@ -1,0 +1,347 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 5: Built-in functions</title>
+</head>
+<body>
+
+<h1>Built-in functions</h1>
+
+<p>
+So far in our implementation, we have made use of the functions
+<code>car</code>, <code>cdr</code> and <code>cons</code> to construct
+and access LISP data. Now, we will make the same functionality
+available within the interpreted environment.
+</p>
+
+<p>
+We shall extend the list expression syntax to add some new operators:
+<dl>
+  <dt><code>(CAR EXPR)</code>
+  <dd>Evaluates <code>EXPR</code> and returns the <i>car</i> of the
+    result. It is an error if <code>EXPR</code> does not evaluate to a
+    pair or <code>NIL</code>.</dd>
+  <dt><code>(CDR EXPR)</code>
+  <dd>Evaluates <code>EXPR</code> and returns the <i>cdr</i> of the
+    result. It is an error if <code>EXPR</code> does not evaluate to a
+    pair or <code>NIL</code>.</dd>
+  <dt><code>(CONS A B)</code>
+  <dd>Evaluates both arguments <code>A</code> and <code>B</code>,
+    and returns a newly constructed pair containing the results.</dd>
+</dl>
+</p>
+
+<p>
+In the definitions above we allow taking the <i>car</i> and <i>cdr</i> of
+<code>NIL</code>, unlike our C versions. Some algorithms are simpler to
+express if the <i>car</i> and <i>cdr</i> of <code>NIL</code> are defined
+to be <code>NIL</code>.
+</p>
+
+<p>
+We could choose to implement these by adding more special cases
+to <code>eval_expr</code>, just like we did with <code>QUOTE</code>
+and <code>DEFINE</code>. However, we will want to add more operators
+in the future &mdash; and adding each one to <code>eval_expr</code>
+would cause the function to get very long. The alternative is to introduce
+the concept of <i>functions</i>.
+</p>
+
+<h3>Functions</h3>
+
+<p>
+A function is a recipe for converting arguments into a value. If
+<code>eval_expr</code> encounters a list expression with a function
+as the operator, all it has to do is follow the recipe to come up with
+a value to use as the result of the expression.
+</p>
+
+<p>
+One way to implement these recipes is to create C functions which can
+be called from <code>eval_expr</code>. We will call these <i>built-in</i>
+or <i>primitive</i> functions. Let's see how to extend our LISP
+interpreter to accommodate these.
+</p>
+
+<h2>A new type of atom</h2>
+
+<p>
+<code>eval_expr</code> will call built-in functions through a C function
+pointer, so they must all have the same prototype:
+<pre class="c">
+typedef int (*Builtin)(struct Atom args, struct Atom *result);
+</pre>
+</p>
+
+<p>
+In order to appear in expressions, we need a new kind of atom to
+represent them.
+<pre class="c">
+struct Atom {
+	enum {
+		.
+		.
+		.
+		AtomType_Builtin
+	} type;
+
+	union {
+		.
+		.
+		.
+		Builtin builtin;
+	} value;
+};
+</pre>
+Sections of code which we wrote previously are abbreviated as
+"<code>. . .</code>".
+</p>
+
+<p>
+For completeness, <code>print_expr</code> needs to know how to display
+the new atom:
+<pre class="c">
+void print_expr(Atom atom)
+{
+	switch (atom.type) {
+	.
+	.
+	.
+	case AtomType_Builtin:
+		printf("#&lt;BUILTIN:%p&gt;", atom.value.builtin);
+		break;
+	}
+}
+</pre>
+</p>
+
+<p>
+And finally a helper function to create atoms of the new type:
+<pre class="c">
+Atom make_builtin(Builtin fn)
+{
+	Atom a;
+	a.type = AtomType_Builtin;
+	a.value.builtin = fn;
+	return a;
+}
+</pre>
+</p>
+
+<h2>Extending the evaluator</h2>
+
+<p>
+We will need to create a <i>shallow copy</i> of the argument
+list.
+</p>
+
+<pre class="c">
+Atom copy_list(Atom list)
+{
+	Atom a, p;
+
+	if (nilp(list))
+		return nil;
+
+	a = cons(car(list), nil);
+	p = a;
+	list = cdr(list);
+
+	while (!nilp(list)) {
+		cdr(p) = cons(car(list), nil);
+		p = cdr(p);
+		list = cdr(list);
+	}
+
+	return a;
+}
+</pre>
+
+<p>
+<code>apply</code> simply calls the builtin function with a supplied
+list of arguments. We will extend this function later when we
+want to deal with other kinds of evaluation recipe.
+</p>
+
+<pre class="c">
+int apply(Atom fn, Atom args, Atom *result)
+{
+	if (fn.type == AtomType_Builtin)
+		return (*fn.value.builtin)(args, result);
+
+	return Error_Type;
+}
+</pre>
+
+<p>
+If a list expression is not one of the special forms we defined
+previously, then we will assume that the operator is something which
+evaluates to a function. We will also evaluate each of the arguments,
+and use <code>apply</code> to call that function with the list of
+results.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	Atom op, args, p;
+	Error err;
+
+	.
+	.
+	.
+
+	if (op.type == AtomType_Symbol) {
+		.
+		.
+		.
+	}
+
+	/* Evaluate operator */
+	err = eval_expr(op, env, &amp;op);
+	if (err)
+		return err;
+
+	/* Evaulate arguments */
+	args = copy_list(args);
+	p = args;
+	while (!nilp(p)) {
+		err = eval_expr(car(p), env, &amp;car(p));
+		if (err)
+			return err;
+
+		p = cdr(p);
+	}
+
+	return apply(op, args, result);
+}
+</pre>
+
+<p>
+The argument list is copied before being overwritten with the results of
+evaluating the arguments. We don't want to overwrite the original
+argument list in case we need to use the form again in the future.
+</p>
+
+<h2>Initial environment</h2>
+
+<p>
+Previously we created an empty environment for the read-eval-print loop.
+The user has no way of creating atoms which represent builtin functions,
+so we populate the initial environment with bindings for our builtins.
+</p>
+
+<p>
+The functions themselves:
+</p>
+
+<pre class="c">
+int builtin_car(Atom args, Atom *result)
+{
+	if (nilp(args) || !nilp(cdr(args)))
+		return Error_Args;
+
+	if (nilp(car(args)))
+		*result = nil;
+	else if (car(args).type != AtomType_Pair)
+		return Error_Type;
+	else
+		*result = car(car(args));
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+Almost all of the function is code to deal with errors and type checking!
+Creating functions in this way is pretty tedious. 
+</p>
+
+<pre class="c">
+int builtin_cdr(Atom args, Atom *result)
+{
+	if (nilp(args) || !nilp(cdr(args)))
+		return Error_Args;
+
+	if (nilp(car(args)))
+		*result = nil;
+	else if (car(args).type != AtomType_Pair)
+		return Error_Type;
+	else
+		*result = cdr(car(args));
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+<code>builtin_cdr</code> is almost identical to <code>builtin_car</code>.
+</p>
+
+<pre class="c">
+int builtin_cons(Atom args, Atom *result)
+{
+	if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+		return Error_Args;
+
+	*result = cons(car(args), car(cdr(args)));
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+With these defined, we can at last use <code>env_set</code> to create
+the bindings.
+</p>
+
+<pre class="c">
+int main(int argc, char **argv)
+{
+	Atom env;
+	char *input;
+
+	env = env_create(nil);
+
+	/* Set up the initial environment */
+	env_set(env, make_sym("CAR"), make_builtin(builtin_car));
+	env_set(env, make_sym("CDR"), make_builtin(builtin_cdr));
+	env_set(env, make_sym("CONS"), make_builtin(builtin_cons));
+
+	while ((input = readline("&gt; ")) != NULL) {
+		.
+		.
+		.
+	}
+
+	return 0;
+}
+</pre>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(define foo 1)</b>
+FOO
+&gt; <b>(define bar 2)</b>
+BAR
+&gt; <b>(cons foo bar)</b>
+(1 . 2)
+&gt; <b>(define baz (quote (a b c)))</b>
+BAZ
+&gt; <b>(car baz)</b>
+A
+&gt; <b>(cdr baz)</b>
+(B C)
+</pre>
+
+<p>
+Notice that <code>(CONS FOO BAR)</code> is <em>not</em> the same as
+<code>(QUOTE (FOO . BAR))</code>. In the former expression, the arguments
+are evaluated and a new pair is created.
+</p>
+
+</body>
+</html>
+

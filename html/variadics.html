@@ -1,0 +1,205 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 10: Variadic functions</title>
+</head>
+<body>
+
+<h1>Variadic functions</h1>
+
+<p>
+Up till now all functions have had a specified number of named arguments.
+We will now introduce a syntax for defining <i>variadic</i> functions,
+which may take a fixed number of named arguments and a variable number
+of additional arguments which are collected into a named list.
+</p>
+
+<p>
+The argument declarations for variadic functions are improper lists:
+</p>
+
+<table border="1">
+  <tr><th /><th>&lambda;-syntax</th><th>Combined <code>DEFINE</code></th></tr>
+  <tr>
+    <th>3 args</th>
+    <td>
+      <code>(LAMBDA (arg1 arg2 arg3) <i>body...</i>)</code>
+    </td>
+    <td>
+      <code>(DEFINE (<i>name</i> arg1 arg2 arg3) <i>body...</i>)</code>
+    </td>
+  </tr>
+  <tr>
+    <th>&ge;2 args</th>
+    <td>
+      <code>(LAMBDA (arg1 arg2 . rest) <i>body...</i>)</code>
+    </td>
+    <td>
+      <code>(DEFINE (<i>name</i> arg1 arg2 . rest) <i>body...</i>)</code>
+    </td>
+  </tr>
+  <tr>
+    <th>&ge;1 args</th>
+    <td>
+      <code>(LAMBDA (arg1 . rest) <i>body...</i>)</code>
+    </td>
+    <td>
+      <code>(DEFINE (<i>name</i> arg1 . rest) <i>body...</i>)</code>
+    </td>
+  </tr>
+  <tr>
+    <th>&ge;0 args</th>
+    <td>
+      <code>(LAMBDA args <i>body...</i>)</code>
+    </td>
+    <td>
+      <code>(DEFINE (<i>name</i> . args) <i>body...</i>)</code>
+    </td>
+  </tr>
+</table>
+
+<p>
+In the definitions above, the parameters are bound as follows:
+</p>
+
+<table border="1">
+  <tr>
+    <th rowspan="2">Definition</th>
+    <th colspan="3"><code>(f 1 2 3)</code></th>
+  </tr>
+  <tr>
+    <th>Value of <code>a</code></th>
+    <th>Value of <code>b</code></th>
+    <th>Value of <code>c</code></th>
+  </tr>
+  <tr>
+    <td><code>(DEFINE (f a b c) <i>body...</i>)</code></td>
+    <td><code>1</code></td>
+    <td><code>2</code></td>
+    <td><code>3</code></td>
+  </tr>
+  <tr>
+    <td><code>(DEFINE (f a b . c) <i>body...</i>)</code></td>
+    <td><code>1</code></td>
+    <td><code>2</code></td>
+    <td><code>(3)</code></td>
+  </tr>
+  <tr>
+    <td><code>(DEFINE (f a . b) <i>body...</i>)</code></td>
+    <td><code>1</code></td>
+    <td><code>(2 3)</code></td>
+  </tr>
+  <tr>
+    <td><code>(DEFINE (f . a) <i>body...</i>)</code></td>
+    <td><code>(1 2 3)</code></td>
+  </tr>
+</table>
+
+<h4>Implementation</h4>
+
+<p>
+All that is required is a small modification to
+<code>make_closure</code> to accept the declaration:
+<pre class="c">
+int make_closure(Atom env, Atom args, Atom body, Atom *result)
+{
+	Atom p;
+
+	<b>if (!listp(body))</b>
+		return Error_Syntax;
+
+	/* Check argument names are all symbols */
+	p = args;
+	while (!nilp(p)) {
+		<b>if (p.type == AtomType_Symbol)
+			break;
+		else if (p.type != AtomType_Pair
+				|| car(p).type != AtomType_Symbol)
+			return Error_Type;</b>
+		p = cdr(p);
+	}
+
+	*result = cons(env, cons(args, body));
+	result->type = AtomType_Closure;
+
+	return Error_OK;
+}
+</pre>
+</p>
+
+<p>
+And another to <code>apply</code> to bind the additional arguments
+into a list:
+<pre class="c">
+int apply(Atom fn, Atom args, Atom *result)
+{
+	.
+	.
+	.
+	/* Bind the arguments */
+	while (!nilp(arg_names)) {
+		<b>if (arg_names.type == AtomType_Symbol) {
+			env_set(env, arg_names, args);
+			args = nil;
+			break;
+		}</b>
+
+		if (nilp(args))
+			return Error_Args;
+		env_set(env, car(arg_names), car(args));
+		arg_names = cdr(arg_names);
+		args = cdr(args);
+	}
+	if (!nilp(args))
+		return Error_Args;
+	.
+	.
+	.
+}
+</pre>
+</p>
+
+<h4>Testing</h4>
+
+<p>
+A boring example:
+</p>
+
+<pre class="lisp">
+&gt; <b>((lambda (a . b) a) 1 2 3)</b>
+1
+&gt; <b>((lambda (a . b) b) 1 2 3)</b>
+(2 3)
+&gt; <b>((lambda args args) 1 2 3)</b>
+(1 2 3)
+</pre>
+
+<p>
+We can also create a variadic adder:
+</p>
+
+<pre class="lisp">
+&gt; <b>(define (sum-list xs)
+    (if xs
+        (+ (car xs) (sum-list (cdr xs)))
+        0))</b>
+SUM-LIST
+&gt; <b>(sum-list '(1 2 3))</b>
+6
+&gt; <b>(define (add . xs) (sum-list xs))</b>
+ADD
+&gt; <b>(add 1 2 3)</b>
+6
+&gt; <b>(add 1 (- 4 2) (/ 9 3))</b>
+6
+</pre>
+
+<p>
+Since you can always pass a list to a regular function, this is
+really just another kind of syntactic sugar.
+</p>
+
+</body>
+</html>
+

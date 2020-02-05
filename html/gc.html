@@ -1,0 +1,162 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 15: Garbage collection</title>
+</head>
+<body>
+
+<h1>Garbage collection</h1>
+
+<p>
+We will implement a very simple mark-and-sweep garbage collector.
+This is not something you would want to use in a real application,
+but it will serve for our purposes.
+</p>
+
+<p>
+Remember that all our LISP data is allocated through the
+<code>cons</code> function. First we modify it to keep track of
+every allocation in a linked list.
+</p>
+
+<pre class="c">
+struct Allocation {
+	struct Pair pair;
+	int mark : 1;
+	struct Allocation *next;
+};
+
+struct Allocation *global_allocations = NULL;
+
+Atom cons(Atom car_val, Atom cdr_val)
+{
+	struct Allocation *a;
+	Atom p;
+
+	a = malloc(sizeof(struct Allocation));
+	a->mark = 0;
+	a->next = global_allocations;
+	global_allocations = a;
+
+	p.type = AtomType_Pair;
+	p.value.pair = &amp;a->pair;
+
+	car(p) = car_val;
+	cdr(p) = cdr_val;
+
+	return p;
+}
+</pre>
+
+<p>
+Now a function to mark a whole tree of pairs as "in use".
+</p>
+
+<pre class="c">
+void gc_mark(Atom root)
+{
+	struct Allocation *a;
+
+	if (!(root.type == AtomType_Pair
+		|| root.type == AtomType_Closure
+		|| root.type == AtomType_Macro))
+		return;
+
+	a = (struct Allocation *)
+		((char *) root.value.pair
+			- offsetof(struct Allocation, pair));
+
+	if (a->mark)
+		return;
+
+	a->mark = 1;
+
+	gc_mark(car(root));
+	gc_mark(cdr(root));
+}
+</pre>
+
+<p>
+The garbage collector frees everything which is not marked, and
+then clears the marks ready for the next run. We also mark the
+symbol table since these are referenced by a static variable.
+</p>
+
+<pre class="c">
+void gc()
+{
+	struct Allocation *a, **p;
+
+	gc_mark(sym_table);
+
+	/* Free unmarked allocations */
+	p = &global_allocations;
+	while (*p != NULL) {
+		a = *p;
+		if (!a->mark) {
+			*p = a->next;
+			free(a);
+		} else {
+			p = &amp;a->next;
+		}
+	}
+
+	/* Clear marks */
+	a = global_allocations;
+	while (a != NULL) {
+		a->mark = 0;
+		a = a->next;
+	}
+}
+</pre>
+
+<p>
+So that we don't run out of memory under deep recursion, we
+need to call the garbage collector every few iterations of
+<code>eval_expr</code>. The interval will roughly determine
+how many allocations are made between garbage collections.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	static int count = 0;
+	Error err = Error_OK;
+	Atom stack = nil;
+
+	do {
+		if (++count == 100000) {
+			gc_mark(expr);
+			gc_mark(env);
+			gc_mark(stack);
+			gc();
+			count = 0;
+		}
+
+	.
+	.
+	.
+}
+</pre>
+
+<h4>Testing</h4>
+
+<p>
+Adapting the <code>COUNT</code> example from previous chapters:
+</p>
+
+<pre class="lisp">
+&gt; (define (count n) (if (= n 0) t (count (- n 1))))
+COUNT
+&gt; (count 1000000)
+T
+</pre>
+
+<p>
+And lo! the operation completes without eating up all of our RAM.
+</p>
+
+</body>
+</html>
+

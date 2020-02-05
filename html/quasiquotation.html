@@ -1,0 +1,311 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 13: Quasiquotation</title>
+</head>
+<body>
+
+<h1>Quasiquotation</h1>
+
+<p>
+<code>QUASIQUOTE</code> is an extension of the <code>QUOTE</code>
+special form which is convenient for writing macros.
+</p>
+
+<p>
+For symbols and other simple data, <code>QUASIQUOTE</code> behaves
+like <code>QUOTE</code>, returning the datum unevaluated. Lists
+are also return without being evaluated, with two exceptions. If
+an element of the list (or a sub-list) is of the form
+<code>(UNQUOTE <i>expr</i>)</code>, then <code>expr</code> is
+evaluated and the result inserted into the list in place.
+<code>(UNQUOTE-SPLICING <i>expr</i>)</code> is similar, but the
+result of evaluating <code>expr</code> must be a list, the items
+of which are spliced into the parent list.
+</p>
+
+<h4>Example</h4>
+
+<p>
+<pre class="lisp">
+(QUASIQUOTE (+ 1 (UNQUOTE (+ 2 3))))
+</pre>
+evaluates to
+<pre class="lisp">
+(+ 1 5)
+</pre>
+</p>
+
+<p>
+If we define <code>L</code> to be the list <code>(3 4 5)</code>
+then
+<pre class="lisp">
+(QUASIQUOTE (1 2 (UNQUOTE-SPLICING L)))
+</pre>
+evaluates to
+<pre class="lisp">
+(1 2 3 4 5)
+</pre>
+</p>
+
+<h3>Shorthand syntax</h3>
+
+<p>
+Just like <code>QUOTE</code>, we will define the following
+abbreviations.
+</p>
+
+<table border="1">
+  <tr><th>Abbreviation</th><th>Equivalent to</th></tr>
+  <tr>
+    <td><code>`<i>expr</i></code></td>
+    <td><code>(QUASIQUOTE <i>expr</i>)</code></td>
+  </tr>
+  <tr>
+    <td><code>,<i>expr</i></code></td>
+    <td><code>(UNQUOTE <i>expr</i>)</code></td>
+  </tr>
+  <tr>
+    <td><code>,@<i>expr</i></code></td>
+    <td><code>(UNQUOTE-SPLICING <i>expr</i>)</code></td>
+  </tr>
+</table>
+
+<p>
+Rewriting the examples above with this syntax gives
+<pre class="lisp">
+`(+ 1 ,(+ 2 3))
+</pre>
+and
+<pre class="lisp">
+`(1 2 ,@L)
+</pre>
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+We extend the lexer to understand the additional special tokens.
+</p>
+
+<pre class="c">
+int lex(const char *str, const char **start, const char **end)
+{
+	const char *ws = " \t\n";
+	const char *delim = "() \t\n";
+	const char *prefix = "()\'<b>`</b>";
+
+	str += strspn(str, ws);
+
+	if (str[0] == '\0') {
+		*start = *end = NULL;
+		return Error_Syntax;
+	}
+
+	*start = str;
+
+	if (strchr(prefix, str[0]) != NULL)
+		*end = str + 1;
+	<b>else if (str[0] == ',')
+		*end = str + (str[1] == '@' ? 2 : 1);</b>
+	else
+		*end = str + strcspn(str, delim);
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+<code>read_expr</code> must expand the abbreviations in the same
+way as <code>QUOTE</code>
+</p>
+
+<pre class="c">
+int read_expr(const char *input, const char **end, Atom *result)
+{
+	.
+	.
+	.
+	if (token[0] == '(') {
+	.
+	.
+	.
+	} else if (token[0] == '`') {
+		*result = cons(make_sym("QUASIQUOTE"), cons(nil, nil));
+		return read_expr(*end, end, &car(cdr(*result)));
+	} else if (token[0] == ',') {
+		*result = cons(make_sym(
+			token[1] == '@' ? "UNQUOTE-SPLICING" : "UNQUOTE"),
+			cons(nil, nil));
+		return read_expr(*end, end, &car(cdr(*result)));
+	} else {
+		.
+		.
+		.
+	}
+}
+</pre>
+
+<p>
+The <code>QUASIQUOTE</code> operator itself may be defined as a macro.
+First we need a few helper functions.
+</p>
+
+<pre class="lisp">
+(define (append a b) (foldr cons b a))
+
+(define (caar x) (car (car x)))
+
+(define (cadr x) (car (cdr x)))
+</pre>
+
+<p>
+<code>(append <i>a b</i>)</code> concatenates the lists <code>a</code>
+and <code>b</code>.
+</p>
+
+<p>
+And now the macro itself:
+</p>
+
+<pre class="lisp">
+(defmacro (quasiquote x)
+  (if (pair? x)
+      (if (eq? (car x) 'unquote)
+          (cadr x)
+          (if (eq? (caar x) 'unquote-splicing)
+              (list 'append
+                    (cadr (car x))
+                    (list 'quasiquote (cdr x)))
+              (list 'cons
+                    (list 'quasiquote (car x))
+                    (list 'quasiquote (cdr x)))))
+      (list 'quote x)))
+</pre>
+
+<p>
+The definition above is a little hard to follow, since the
+resulting expression must be built up using <code>LIST</code>
+and may include additional calls to <code>QUASIQUOTE</code>.
+</p>
+
+<p>
+Quasiquotation allows us to make the body of a macro look like
+the expression it returns; for example the <code>IGNORE</code>
+macro in chapter 11
+<pre class="lisp">
+(DEFMACRO (IGNORE X)
+  (CONS 'QUOTE (CONS X NIL)))
+</pre>
+can now be written
+<pre class="lisp">
+(DEFMACRO (IGNORE X)
+  `(QUOTE ,X))
+</pre>
+and the operation is made clear.
+</p>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>`(+ 1 ,(+ 2 3))</b>
+(+ 1 5)
+&gt; <b>(define l '(3 4 5))</b>
+L
+&gt; <b>`(1 2 ,@l)</b>
+(1 2 3 4 5)
+</pre>
+
+<h2><code>let</code></h2>
+
+<p>
+We will now use <code>QUASIQUOTE</code> to define a new special
+form:
+<pre class="lisp">
+(LET ((<i>sym1 expr1</i>)
+      (<i>sym2 expr2</i>)
+      ...)
+  <i>body</i>...)
+</pre>
+</p>
+
+<p>
+<code>LET</code> causes the expressions <code>expr</code> to be evaluated
+with the symbols <code>sym1</code>, <code>sym2</code>... bound to the
+result of evaluating <code>expr1</code>, <code>expr2</code> and so on.
+The result of the last expression <code>body</code> to be evaluated
+is returned.
+</p>
+
+<p>
+The definition is simple.
+</p>
+
+<pre class="lisp">
+(defmacro (let defs . body)
+  `((lambda ,(map car defs) ,@body)
+    ,@(map cadr defs)))
+</pre>
+
+<h4>Example</h4>
+
+<p>
+When we evaluate the form
+<pre class="lisp">
+(LET ((X 3) (Y 5)) (+ X Y))
+</pre>
+it is transformed by the <code>LET</code> macro into
+<pre class="lisp">
+((LAMBDA (X Y) (+ X Y)) 3 5)
+</pre>
+which behaves as desired.
+</p>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(let ((x 3) (y 5)) (+ x y))</b>
+8
+&gt; <b>x</b>
+Symbol not bound
+</pre>
+
+<p>
+The <code>LET</code> expression clarifies the programmer's
+intent to make temporary definitions.
+</p>
+
+<h3>A trick</h3>
+
+<p>
+We can use <code>LET</code> to extend the built-in binary operator
+<code>+</code> to accept any number of arguments.
+</p>
+
+<pre class="lisp">
+(define +
+  (let ((old+ +))
+    (lambda xs (foldl old+ 0 xs))))
+</pre>
+
+<p>
+Compare this with the definition of <code>ADD</code> add the end
+of chapter 10.
+</p>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(+ 1 2 3 4)</b>
+10
+</pre>
+
+<p>
+We didn't have to touch <code>builtin_add</code> or even recompile
+the interpreter.
+</p>
+
+</body>
+</html>
+

@@ -1,0 +1,342 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 12: Library</title>
+</head>
+<body>
+
+<h1>Library</h1>
+
+<p>
+We will now create a small <i>library</i> of useful functions for
+our LISP system. Rather than creating new builtins for each one,
+let's take advantage of the fact that much of the LISP standard
+library can be implemented in LISP itself in terms of lower-level
+fuctions.
+</p>
+
+<p>
+First we need a function to read the library definitions from disk.
+</p>
+
+<pre class="c">
+char *slurp(const char *path)
+{
+	FILE *file;
+	char *buf;
+	long len;
+
+	file = fopen(path, "r");
+	if (!file)
+		return NULL;
+	fseek(file, 0, SEEK_END);
+	len = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	buf = malloc(len);
+	if (!buf)
+		return NULL;
+
+	fread(buf, 1, len, file);
+	fclose(file);
+
+	return buf;
+}
+</pre>
+
+<p>
+And a routine, similar to our REPL in <code>main</code>, to
+process the definitions. Because we read the whole file in one
+go, there is no problem with splitting definitions over several
+lines.
+</p>
+
+<pre class="c">
+void load_file(Atom env, const char *path)
+{
+	char *text;
+
+	printf("Reading %s...\n", path);
+	text = slurp(path);
+	if (text) {
+		const char *p = text;
+		Atom expr;
+		while (read_expr(p, &amp;p, &amp;expr) == Error_OK) {
+			Atom result;
+			Error err = eval_expr(expr, env, &amp;result);
+			if (err) {
+				printf("Error in expression:\n\t");
+				print_expr(expr);
+				putchar('\n');
+			} else {
+				print_expr(result);
+				putchar('\n');
+			}
+		}
+		free(text);
+	}
+}
+</pre>
+
+<p>
+Finally read in the library after setting up the builtins.
+</p>
+
+<pre class="c">
+int main(int argc, char **argv)
+{
+	.
+ 	.
+	.
+
+	/* Set up the initial environment */
+	.
+	.
+	.
+
+	<b>load_file(env, "library.lisp");</b>
+
+	/* Main loop */
+	.
+	.
+	.
+}
+</pre>
+
+<h4>Testing</h4>
+
+<p>
+Create <code>library.lisp</code> with the following definition:
+<pre class="lisp">
+(define (abs x) (if (&lt; x 0) (- x) x))
+</pre>
+</p>
+
+<p>
+And run the interpreter:
+<pre class="lisp">
+Reading library.lisp...
+ABS
+&gt; <b>(abs -2)</b>
+2
+</pre>
+The <code>ABS</code> function will now be available in every session
+without having to define it each time.
+</p>
+
+<h2><code>fold</code></h2>
+
+<p>
+<code>foldl</code> and <code>foldr</code> allow us to easily construct
+functions which combine elements of a list.
+</p>
+
+<pre class="lisp">
+(define (foldl proc init list)
+  (if list
+      (foldl proc
+             (proc init (car list))
+             (cdr list))
+      init))
+
+(define (foldr proc init list)
+  (if list
+      (proc (car list)
+            (foldr proc init (cdr list)))
+      init))
+</pre>
+
+<p>
+See
+<a href="http://en.wikipedia.org/wiki/Fold_(higher-order_function)">
+the internet</a> for more details.
+</p>
+
+<pre class="lisp">
+(define (list . items)
+  (foldr cons nil items))
+
+(define (reverse list)
+  (foldl (lambda (a x) (cons x a)) nil list))
+</pre>
+
+<p>
+<code>list</code> constructs a new list containing its arguments.
+<code>reverse</code> creates a copy of a list with the items in
+reverse order.
+</p>
+
+<p>
+The recursive definition of <code>LIST</code> requires O(n) stack
+space - a serious implementation would most likely use a more efficient
+version.
+</p>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(list (+ 3 5) 'foo)</b>
+(8 FOO)
+&gt; <b>(reverse '(1 2 3))</b>
+(3 2 1)
+</pre>
+
+<p>
+See how much easier this was than implementing the functions as
+builtins.
+</p>
+
+<h2>More builtins</h2>
+
+<p>
+Some primitive functions require access to the internals of the system.
+</p>
+
+<h3><code>apply</code></h3>
+
+<p>
+The <code>apply</code> function:
+<pre class="lisp">
+(APPLY <i>fn arg-list</i>)
+</pre>
+calls <code>fn</code> with the arguments bound to the values in the
+list <code>arg-list</code>.
+</p>
+
+<pre class="c">
+int builtin_apply(Atom args, Atom *result)
+{
+	Atom fn;
+
+	if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+		return Error_Args;
+
+	fn = car(args);
+	args = car(cdr(args));
+
+	if (!listp(args))
+		return Error_Syntax;
+
+	return apply(fn, args, result);
+}
+</pre>
+
+<h3><code>eq?</code></h3>
+
+<p>
+<code>eq?</code> tests whether two atoms refer to the same object.
+</p>
+
+<pre class="c">
+int builtin_eq(Atom args, Atom *result)
+{
+	Atom a, b;
+	int eq;
+
+	if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type == b.type) {
+		switch (a.type) {
+		case AtomType_Nil:
+			eq = 1;
+			break;
+		case AtomType_Pair:
+		case AtomType_Closure:
+		case AtomType_Macro:
+			eq = (a.value.pair == b.value.pair);
+			break;
+		case AtomType_Symbol:
+			eq = (a.value.symbol == b.value.symbol);
+			break;
+		case AtomType_Integer:
+			eq = (a.value.integer == b.value.integer);
+			break;
+		case AtomType_Builtin:
+			eq = (a.value.builtin == b.value.builtin);
+			break;
+		}
+	} else {
+		eq = 0;
+	}
+
+	*result = eq ? make_sym("T") : nil;
+	return Error_OK;
+}
+</pre>
+
+<h3><code>pair?</code></h3>
+
+<p>
+Tests whether an atom is a pair.
+</p>
+
+<pre class="c">
+int builtin_pairp(Atom args, Atom *result)
+{
+	if (nilp(args) || !nilp(cdr(args)))
+		return Error_Args;
+
+	*result = (car(args).type == AtomType_Pair) ? make_sym("T") : nil;
+	return Error_OK;
+}
+</pre>
+
+<p>
+Don't forget to add bindings for these to the initial environment.
+<pre class="c">
+env_set(env, make_sym("APPLY"), make_builtin(builtin_apply));
+env_set(env, make_sym("EQ?"), make_builtin(builtin_eq));
+env_set(env, make_sym("PAIR?"), make_builtin(builtin_pairp));
+</pre>
+</p>
+
+<h2><code>map</code></h2>
+
+<p>
+We can use <code>foldr</code> and <code>apply</code> to implement
+another important function <code>map</code>, which constructs a
+list containing the results of calling an <i>n</i>-ary function
+with the values contained in <i>n</i> lists in turn.
+</p>
+
+<pre class="lisp">
+(define (unary-map proc list)
+  (foldr (lambda (x rest) (cons (proc x) rest))
+         nil
+         list))
+
+(define (map proc . arg-lists)
+  (if (car arg-lists)
+      (cons (apply proc (unary-map car arg-lists))
+            (apply map (cons proc
+                             (unary-map cdr arg-lists))))
+      nil))
+</pre>
+
+<p>
+Once again please note that there are alternative implementations.
+</p>
+
+<p>
+It works like this:
+</p>
+
+<pre class="lisp">
+&gt; <b>(map + '(1 2 3) '(4 5 6))</b>
+(5 7 9)
+</pre>
+
+<p>
+The result is a list containing the results of evaluating
+<code>(+ 1 4)</code>, <code>(+ 2 5)</code>, and
+<code>(+ 3 6)</code>.
+</p>
+
+</body>
+</html>
+

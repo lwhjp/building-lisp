@@ -1,0 +1,272 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 2: Data</title>
+</head>
+<body>
+
+<h1>Data</h1>
+
+<p>
+We will define four kinds of object to begin with:
+<dl>
+ <dt>Integer</dt>
+ <dd>A number. For example: 3, -9, 0.</dd>
+ <dt>Symbol</dt>
+ <dd>A name consisting of a string of characters. For
+  example: <code>FOO</code>, <code>BAR</code>, <code>ADD-TWO</code>.
+  We will normalize characters to upper-case in this project, but this
+  is not strictly necessary.</dd>
+ <dt><code>NIL</code></dt>
+ <dd>Represents "nothing". A bit like <code>NULL</code> in C and other
+  languages.</dd>
+ <dt>Pair</dt>
+ <dd>A pair consists of two elements, which for historical reasons are
+  called <i>car</i> and <i>cdr</i>. Both can hold either an integer, a
+  symbol, <code>NIL</code>, or a <em>reference</em> to another pair.
+  The types of each element may be different.</dd>
+</dl>
+Integers, symbols and <code>NIL</code> are called <i>simple data</i>.
+The term <i>atom</i> can refer to either a simple datum or a pair
+(purists may disagree on this point).
+</p>
+
+<p>
+Note that integers and symbols are <em>immutable</em>, so we can think
+of two integers with the same value as being the same object. This is
+particularly useful for symbols, because it allows us to test for
+equality by comparing pointers.
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+Let's declare some C types to hold our data. There are many clever ways
+to store LISP objects efficiently, but for this implementation we will
+stick to a very simple scheme <small>[please excuse the pun]</small>.
+</p>
+
+<pre class="c">
+struct Atom {
+	enum {
+		AtomType_Nil,
+		AtomType_Pair,
+		AtomType_Symbol,
+		AtomType_Integer
+	} type;
+
+	union {
+		struct Pair *pair;
+		const char *symbol;
+		long integer;
+	} value;
+};
+
+struct Pair {
+	struct Atom atom[2];
+};
+
+typedef struct Atom Atom;
+</pre>
+
+<p>
+A few macros will be handy:
+<pre class="c">
+#define car(p) ((p).value.pair-&gt;atom[0])
+#define cdr(p) ((p).value.pair-&gt;atom[1])
+#define nilp(atom) ((atom).type == AtomType_Nil)
+
+static const Atom nil = { AtomType_Nil };
+</pre>
+The "p" in <code>nilp</code> stands for "predicate". Identifiers in C
+may not contain question marks. There is no need to restrict our LISP
+implementation in that way, of course.
+</p>
+
+<p>
+Integers and (pointers to) strings can be copied around, but we need to
+allocate pairs on the heap.
+<pre class="c">
+Atom cons(Atom car_val, Atom cdr_val)
+{
+	Atom p;
+
+	p.type = AtomType_Pair;
+	p.value.pair = malloc(sizeof(struct Pair));
+
+	car(p) = car_val;
+	cdr(p) = cdr_val;
+
+	return p;
+}
+</pre>
+<code>cons</code> is a function to allocate a pair on the heap and
+assign its two elements.
+</p>
+
+<p>
+At this point you will have noticed that using <code>cons</code> will
+leak memory the moment its return value is discarded. We will deal with
+that later. Of course, if you are using a garbage-collected language
+then the problem is already taken care of.
+</p>
+
+<h4>Testing</h4>
+
+<p>
+Now we can start creating LISP objects. An integer:
+<pre class="c">
+Atom make_int(long x)
+{
+	Atom a;
+	a.type = AtomType_Integer;
+	a.value.integer = x;
+	return a;
+}
+</pre>
+And a symbol:
+<pre class="c">
+Atom make_sym(const char *s)
+{
+	Atom a;
+	a.type = AtomType_Symbol;
+	a.value.symbol = strdup(s);
+	return a;
+}
+</pre>
+</p>
+
+<h2>Textual representation</h2>
+
+<p>
+We will write a pair like this:
+<pre class="lisp">(a . b)</pre>
+where <code>a</code> is the <i>car</i> and <code>b</code> is the
+<i>cdr</i>.
+</p>
+
+<p>
+By using the <i>cdr</i> of a pair to reference another pair, we can
+create a chain:
+<pre class="lisp">
+(a . (b . (c . (d . NIL))))
+</pre>
+Notice that the <i>cdr</i> of the last pair is <code>NIL</code>. This
+signifies the end of the chain, and we call this structure a
+<em>list</em>. To avoid having to write a large number of brackets, we
+will write the previous list like this:
+<pre class="lisp">(a b c d)</pre>
+Finally, if the <i>cdr</i> of the last pair in a list is not
+<code>NIL</code>, we will write this:
+<pre class="lisp">(p q . r)</pre>
+which is equivalent to
+<pre class="lisp">(p . (q . r))</pre>
+This is called an <i>improper list</i>.
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+Printing an atom or list is simple.
+<pre class="c">
+void print_expr(Atom atom)
+{
+	switch (atom.type) {
+	case AtomType_Nil:
+		printf("NIL");
+		break;
+	case AtomType_Pair:
+		putchar('(');
+		print_expr(car(atom));
+		atom = cdr(atom);
+		while (!nilp(atom)) {
+			if (atom.type == AtomType_Pair) {
+				putchar(' ');
+				print_expr(car(atom));
+				atom = cdr(atom);
+			} else {
+				printf(" . ");
+				print_expr(atom);
+				break;
+			}
+		}
+		putchar(')');
+		break;
+	case AtomType_Symbol:
+		printf("%s", atom.value.symbol);
+		break;
+	case AtomType_Integer:
+		printf("%ld", atom.value.integer);
+		break;
+	}
+}
+</pre>
+By using recursion we can print aribtrarily complex data structures.
+(Actually that's not true: for a very deeply nested structure we will
+run out of stack space, and a self-referencing tree will never finish
+printing).
+</p>
+
+<h4>Testing</h4>
+
+<p>
+See what <code>print_expr</code> does with various atoms:
+<table border="1">
+ <tr><th>Atom</th><th>Output</th></tr>
+ <tr><td><code>make_int(42)</code><td><code>42</code></td>
+ <tr><td><code>make_sym("FOO")</code><td><code>FOO</code></td>
+ <tr><td><code>cons(make_sym("X"), make_sym("Y"))</code><td><code>(X . Y)</code></td>
+ <tr><td><code>cons(make_int(1),<br />
+   &nbsp;&nbsp;cons(make_int(2),<br />
+   &nbsp;&nbsp;cons(make_int(3),<br />
+   &nbsp;&nbsp;nil)))</code><td><code>(1 2 3)</code></td>
+</table>
+</p>
+
+<p>
+All this is pretty trivial. We'll get on to some more interesting stuff
+in the next chapter.
+</p>
+
+<h3>One last thing</h3>
+
+<p>
+Remember we said that we would treat identical symbols as being the
+same object? We can enforce that by keeping track of all the symbols
+created, and returning the same atom if the same sequence of characters
+is requested subsequently.
+</p>
+
+<p>
+Languages with a set or hashtable container make this easy, but we can
+use the LISP data structures already implemented to store the symbols
+in a list:
+<pre class="c">
+static Atom sym_table = { AtomType_Nil };
+
+Atom make_sym(const char *s)
+{
+	Atom a, p;
+
+	p = sym_table;
+	while (!nilp(p)) {
+		a = car(p);
+		if (strcmp(a.value.symbol, s) == 0)
+			return a;
+		p = cdr(p);
+	}
+
+	a.type = AtomType_Symbol;
+	a.value.symbol = strdup(s);
+	sym_table = cons(a, sym_table);
+
+	return a;
+}
+</pre>
+Neat, huh? It's not particularly efficient, but it will do fine for now.
+</p>
+
+</body>
+</html>
+

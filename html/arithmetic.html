@@ -1,0 +1,121 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 6: Arithmetic</title>
+</head>
+<body>
+
+<h1>Arithmetic</h1>
+
+<p>
+So far all we've been able to do is create and name objects. Some of
+those objects have been numbers &mdash; naturally we would like to do
+calculations with those numbers.
+</p>
+
+<p>
+In the last chapter we saw how to create built-in functions to tell
+<code>eval_expr</code> how to process arguments into a return value.
+We will now create four more builtins to perform the basic arithmetic
+operations.
+</p>
+
+<table border="1">
+  <tr><th>Expression</th><th>Result</th></tr>
+  <tr><td><code>(+ X Y)</code></td>
+    <td>The sum of <code>X</code> and <code>Y</code>
+    </td></tr>
+  <tr><td><code>(- X Y)</code></td>
+    <td>The difference of <code>X</code> and <code>Y</code>
+    </td></tr>
+  <tr><td><code>(* X Y)</code></td>
+    <td>The product of <code>X</code> and <code>Y</code>
+    </td></tr>
+  <tr><td><code>(/ X Y)</code></td>
+    <td>The quotient of <code>X</code> and <code>Y</code>
+    </td></tr>
+</table>
+
+<p>
+In the definitions above, when we write "the sum of <code>X</code> and
+<code>Y</code>", what we really mean is "the sum of <em>the values
+obtained by evaluating</em> <code>X</code> and <code>Y</code>".
+Remember that <code>eval_expr</code> will evaluate all the arguments
+to a functions by default; this is usually what we want to happen, so from
+now on we will not explicitly state this where the intent is obvious.
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+Once again almost all of our function consists of checking that the
+correct arguments were supplied. Finally the result is constructed by
+the call to <code>make_int</code>.
+</p>
+
+<pre class="c">
+int builtin_add(Atom args, Atom *result)
+{
+	Atom a, b;
+
+	if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = make_int(a.value.integer + b.value.integer);
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+The other three functions differ by only one character, so I will omit
+them here.
+</p>
+
+<p>
+Finally we need to create bindings for our new functions in the initial
+environment:
+<pre class="c">
+env_set(env, make_sym("+"), make_builtin(builtin_add));
+env_set(env, make_sym("-"), make_builtin(builtin_subtract));
+env_set(env, make_sym("*"), make_builtin(builtin_multiply));
+env_set(env, make_sym("/"), make_builtin(builtin_divide));
+</pre>
+</p>
+
+<h4>Testing</h4>
+
+<p>
+We now have our very own LISP-style calculator.
+</p>
+
+<pre class="lisp">
+&gt; <b>(+ 1 1)</b>
+2
+&gt; <b>(define x (* 6 9))</b>
+X
+&gt; <b>x</b>
+54
+&gt; <b>(- x 12)</b>
+42
+</pre>
+
+<p>
+In the last expression above, note that <code>X</code> is a symbol, not
+an integer. We have to evaluate the arguments so that
+<code>builtin_subtract</code> can operate on the integer value bound to
+<code>X</code> and not the symbol <code>X</code> itself. Similarly
+the value bound to <code>X</code> is the <em>integer</em> result of
+evaluating the <em>expression</em> <code>(* 6 9)</code>.
+</p>
+
+</body>
+</html>
+

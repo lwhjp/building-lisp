@@ -1,0 +1,352 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 4: Expressions</title>
+</head>
+<body>
+
+<h1>Expressions, Environment and Evaluation</h1>
+
+<h2>Expressions</h2>
+
+<p>
+LISP is all about <i>expressions</i>. An expression can be a
+<i>literal</i>, an <i>identifier</i>, or a list consisting of an
+<i>operator</i> and one or more <i>arguments</i>.
+</p>
+
+<p>
+A literal is an object with an intrinsic value. In our system, that's
+either an integer or <code>NIL</code> (if you consider "nothing" to be
+a value).
+</p>
+
+<p>
+An identifier is a <em>name</em> for an object. Symbols can be
+identifiers.
+</p>
+
+<p>
+Everything else is a list of the form <code>(operator argument...)</code>
+where <code>argument...</code> means zero or more arguments.
+</p>
+
+<h2>Environment</h2>
+
+<p>
+To associate identifiers with objects we need an <i>environment</i>.
+This is a collection of <i>bindings</i>, each of which consists of an
+identifier and its corresponding value. For example:
+<table border="1">
+ <tr><th colspan="2">Bindings</th></tr>
+ <tr><th>Identifier</th><th>Value</th></tr>
+ <tr><td><code>FOO</code></td><td><code>42</code></td></tr>
+ <tr><td><code>BAR</code></td><td><code>NIL</code></td></tr>
+ <tr><td><code>BAZ</code></td><td><code>(X Y Z)</code></td></tr>
+</table>
+Note that the identifiers are all symbols, but the values can be any
+object within our system of data &mdash; the value for <code>BAZ</code>
+is a list containing three symbols.
+</p>
+
+<p>
+An environment can also have a <i>parent environment</i>. If there is
+no binding for a particular identifier in the environment, we can check
+the parent, the parent's parent and so on. In this way we can create a
+tree of environments which share bindings with their ancestors unless
+explicit replacements exist.
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+There is a convenient way of representing environments using our LISP
+data types:
+<pre class="lisp">
+(<i>parent</i> (<i>identifier</i> . <i>value</i>)<i>...</i>)
+</pre>
+So the environment above (assuming it has no parent) is:
+<pre class="lisp">
+(NIL (FOO . 42) (BAR . NIL) (BAZ . (X Y Z)))
+</pre>
+</p>
+
+<p>
+Here is a function to create an empty environment with a specified
+parent (which could be <code>NIL</code>):
+<pre class="c">
+Atom env_create(Atom parent)
+{
+	return cons(parent, nil);
+}
+</pre>
+</p>
+
+<p>
+Next we have two functions to retrieve and create bindings in an
+environment.
+</p>
+
+<p>
+<pre class="c">
+int env_get(Atom env, Atom symbol, Atom *result)
+{
+	Atom parent = car(env);
+	Atom bs = cdr(env);
+
+	while (!nilp(bs)) {
+		Atom b = car(bs);
+		if (car(b).value.symbol == symbol.value.symbol) {
+			*result = cdr(b);
+			return Error_OK;
+		}
+		bs = cdr(bs);
+	}
+
+	if (nilp(parent))
+		return Error_Unbound;
+
+	return env_get(parent, symbol, result);
+}
+</pre>
+Disallowing duplicate symbols means that we don't have to call
+<code>strcmp</code> here, which should mean that this lookup function
+is not too slow.
+</p>
+
+<pre class="c">
+int env_set(Atom env, Atom symbol, Atom value)
+{
+	Atom bs = cdr(env);
+	Atom b = nil;
+
+	while (!nilp(bs)) {
+		b = car(bs);
+		if (car(b).value.symbol == symbol.value.symbol) {
+			cdr(b) = value;
+			return Error_OK;
+		}
+		bs = cdr(bs);
+	}
+
+	b = cons(symbol, value);
+	cdr(env) = cons(b, cdr(env));
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+Only <code>env_get</code> recursively checks the parent environments.
+We don't want to modify the bindings of parents.
+</p>
+
+<h2>Evaluation</h2>
+
+<p>
+Now that we have expressions, we can start to <i>evaluate</i> them.
+Evalution is a process which takes an expression and an environment, and
+produces a value (the <i>result</i>). Let's specify the rules.
+</p>
+
+<ul>
+<li>
+A literal will evaluate to itself.
+</li>
+
+<li>
+The environment allows us to determine a value for an identifier.
+Attempting to evaluate an identifier for which no binding exists is an
+error.
+</li>
+
+<li>
+A list expression with one of the following operators is called a
+<i>special form</i>:
+  <dl>
+    <dt><code>QUOTE</code></dt>
+    <dd>The result of evaluating <code>(QUOTE EXPR)</code> is
+      <code>EXPR</code>, which is returned without evaluating.
+    <dt><code>DEFINE</code></dt>
+    <dd>Evaluating <code>(DEFINE SYMBOL EXPR)</code> creates a binding
+      for <code>SYMBOL</code> (or modifies an existing binding) in the
+      evaluation environment. <code>SYMBOL</code> is bound to the value
+      obtained by evaluating <code>EXPR</code>. The final result is
+      <code>SYMBOL</code>.
+    </dl>
+  </dl>
+</li>
+
+<li>
+Anything else, including list expressions with any other operator, is
+invalid.
+</li>
+</ul>
+
+<h4>Implementation</h4>
+
+<p>
+We will need to check whether an expression is a proper list.
+<pre class="c">
+int listp(Atom expr)
+{
+	while (!nilp(expr)) {
+		if (expr.type != AtomType_Pair)
+			return 0;
+		expr = cdr(expr);
+	}
+	return 1;
+}
+</pre>
+</p>
+
+<p>
+The <code>Error</code> enumeration needs a few more entires:
+<table border="1">
+  <tr>
+    <td><code>Error_Unbound</code></td>
+    <td>Attempted to evaluate a symbol for which no binding exists</td>
+  </tr>
+  <tr>
+    <td><code>Error_Args</code></td>
+    <td>A list expression was shorter or longer than expected</tr></td>
+  </tr>
+  <tr>
+    <td><code>Error_Type</code></td>
+    <td>An object in an expression was of a different type than expected</td>
+  </tr>
+</table>
+</p>
+
+<p>
+The function to perform evaluation is now a straightforward translation
+of the rules into C.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	Atom op, args;
+	Error err;
+
+	if (expr.type == AtomType_Symbol) {
+		return env_get(env, expr, result);
+	} else if (expr.type != AtomType_Pair) {
+		*result = expr;
+		return Error_OK;
+	}
+
+	if (!listp(expr))
+		return Error_Syntax;
+
+	op = car(expr);
+	args = cdr(expr);
+
+	if (op.type == AtomType_Symbol) {
+		if (strcmp(op.value.symbol, "QUOTE") == 0) {
+			if (nilp(args) || !nilp(cdr(args)))
+				return Error_Args;
+
+			*result = car(args);
+			return Error_OK;
+		} else if (strcmp(op.value.symbol, "DEFINE") == 0) {
+			Atom sym, val;
+
+			if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+				return Error_Args;
+
+			sym = car(args);
+			if (sym.type != AtomType_Symbol)
+				return Error_Type;
+
+			err = eval_expr(car(cdr(args)), env, &amp;val);
+			if (err)
+				return err;
+
+			*result = sym;
+			return env_set(env, sym, val);
+		}
+	}
+
+	return Error_Syntax;
+}
+</pre>
+
+<h4>Testing</h4>
+
+<p>
+Extending the read-print loop from the previous chapter, we now have a
+read-eval-print loop (REPL). This is the core of our LISP interpreter.
+</p>
+
+<pre class="c">
+int main(int argc, char **argv)
+{
+	Atom env;
+	char *input;
+
+	env = env_create(nil);
+
+	while ((input = readline("&gt; ")) != NULL) {
+		const char *p = input;
+		Error err;
+		Atom expr, result;
+
+		err = read_expr(p, &amp;p, &amp;expr);		
+
+		if (!err)
+			err = eval_expr(expr, env, &amp;result);
+
+		switch (err) {
+		case Error_OK:
+			print_expr(result);
+			putchar('\n');
+			break;
+		case Error_Syntax:
+			puts("Syntax error");
+			break;
+		case Error_Unbound:
+			puts("Symbol not bound");
+			break;
+		case Error_Args:
+			puts("Wrong number of arguments");
+			break;
+		case Error_Type:
+			puts("Wrong type");
+			break;
+		}
+
+		free(input);
+	}
+
+	return 0;
+}
+</pre>
+
+<p>
+Let's see what it can do.
+</p>
+
+<pre class="lisp">
+&gt; <b>foo</b>
+Symbol not bound
+&gt; <b>(quote foo)</b>
+FOO
+&gt; <b>(define foo 42)</b>
+FOO
+&gt; <b>foo</b>
+42
+&gt; <b>(define foo (quote bar))</b>
+FOO
+&gt; <b>foo</b>
+BAR
+</pre>
+
+<p>
+We can now interactively assign names to objects.
+</p>
+
+</body>
+</html>
+

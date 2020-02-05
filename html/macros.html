@@ -1,0 +1,156 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 11: Macros</title>
+</head>
+<body>
+
+<h1>Macros</h1>
+
+<p>
+Macros allow you to create new special forms at runtime. Unlike a
+function, the arguments to a macro are <em>not</em> evaluated. The
+result of evaluating the body of the macro is then itself evaluated.
+</p>
+
+<p>
+Note: these are (essentially) <i>Common LISP</i> macros. Scheme has a
+different macro system, which avoids problems with identifiers
+introduced by the macro, but is more complex.
+</p>
+
+<p>
+We will define macros using the following syntax:
+<pre class="lisp">
+(DEFMACRO (<i>name arg...</i>) <i>body...</i>)
+</pre>
+This matches our <code>DEFINE</code> syntax for functions, but is
+slightly different from the form used in Common LISP.
+</p>
+
+<h4>Example</h4>
+
+<p>
+Take the macro <code>IGNORE</code> defined by:
+<pre class="lisp">
+(DEFMACRO (IGNORE X)
+  (CONS 'QUOTE
+    (CONS X NIL)))
+</pre>
+</p>
+
+<p>
+If we then evaluate the expression
+<pre class="lisp">
+(IGNORE FOO)
+</pre>
+where <code>FOO</code> need not be bound, the body of <code>IGNORE</code>
+will first be evaluated with the argument <code>X</code> bound to the
+<em>unevaluated</em> symbol <code>FOO</code>. The result of evaluating
+the nested <code>CONS</code> expressions within this environment is:
+<pre class="lisp">
+(QUOTE . (FOO . NIL))
+</pre>
+which is of course equivalent to:
+<pre class="lisp">
+(QUOTE FOO)
+</pre>
+Finally, evaluating this value (which is the result of evaluating the
+macro body) gives us:
+<pre class="lisp">
+FOO
+</pre>
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+We will define a new type of atom:
+<pre class="c">
+AtomType_Macro
+</pre>
+the value of which is the same as <code>AtomType_Closure</code>.
+</p>
+
+<p>
+And now simply teach <code>eval_expr</code> about our new macro
+type.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	.
+	.
+	.
+	if (op.type == AtomType_Symbol) {
+		if (strcmp(op.value.symbol, "QUOTE") == 0) {
+		.
+		.
+		.
+		} else if (strcmp(op.value.symbol, "DEFMACRO") == 0) {
+			Atom name, macro;
+			Error err;
+
+			if (nilp(args) || nilp(cdr(args)))
+				return Error_Args;
+
+			if (car(args).type != AtomType_Pair)
+				return Error_Syntax;
+
+			name = car(car(args));
+			if (name.type != AtomType_Symbol)
+				return Error_Type;
+
+			err = make_closure(env, cdr(car(args)),
+				cdr(args), &amp;macro);
+			if (err)
+				return err;
+
+			macro.type = AtomType_Macro;
+			*result = name;
+			return env_set(env, name, macro);
+		}
+	}
+
+	/* Evaluate operator */
+	.
+	.
+	.
+
+	/* Is it a macro? */
+	if (op.type == AtomType_Macro) {
+		Atom expansion;
+		op.type = AtomType_Closure;
+		err = apply(op, args, &amp;expansion);
+		if (err)
+			return err;
+		return eval_expr(expansion, env, result);
+	}
+
+	/* Evaulate arguments */
+	.
+	.
+	.
+}
+</pre>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(defmacro (ignore x) (cons 'quote (cons x nil)))</b>
+IGNORE
+&gt; <b>(ignore foo)</b>
+FOO
+&gt; <b>foo</b>
+Symbol not bound
+</pre>
+
+<p>
+We will use macros in the future to define some new special forms.
+</p>
+
+</body>
+</html>
+

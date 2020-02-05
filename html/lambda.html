@@ -1,0 +1,243 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 7: Lambda expressions and closures</title>
+</head>
+<body>
+
+<h1>Lambda expressions and closures</h1>
+
+<p>
+This is where things start to get interesting. We will now implement
+support for <i>lambda expressions</i>, a way to build functions dynamically
+out of the LISP expressions we can already deal with.
+</p>
+
+<p>
+A lambda expression is a list expression with a particular syntax:
+<pre class="lisp">
+(LAMBDA (<i>arg...</i>) <i>expr...</i>)
+</pre>
+</p>
+
+<p>
+The result of evaluating a <code>LAMBDA</code> expression is a new
+kind of object which we will call a <i>closure</i>. A closure can be used
+in list expressions in the same way as a built-in function. In this case
+the arguments will be bound to the symbols listed as <code>arg...</code>
+in the lambda expression. The <i>body</i> of the function consists of the
+expressions <code>expr...</code>, which will be evaluated in turn. The result
+of evaluating the final expression is the result of applying the arguments
+to the closure.
+</p>
+
+<p>
+That's a pretty dense definition, so here is an example of how we would
+like to use lambda expressions:
+<pre class="lisp">
+(DEFINE SQUARE (LAMBDA (X) (* X X)))
+</pre>
+</p>
+
+<p>
+<code>SQUARE</code> should now be a function of one argument
+<code>X</code>, which returns the result of evaluating
+<code>(* X X)</code>. Thus evaluating <code>(SQUARE 3)</code>
+should return <code>9</code>.
+</p>
+
+<h4>Implementation</h4>
+
+<p>
+We will represent the closure using a list:
+<pre class="lisp">
+(<i>env</i> (<i>arg...</i>) <i>expr...</i>)
+</pre>
+<code>env</code> is the environment in which the closure was defined.
+This is needed to allow the lambda function to use bindings without
+having to pass them as arguments. For example, recall that
+<code>CAR</code> is bound in the initial environment to our primitive
+<code>builtin_car</code> function.
+</p>
+
+<p>
+The first task is to add a new constant for the <code>type</code> field
+of our <code>Atom</code> structure:
+<pre class="c">
+struct Atom {
+	enum {
+		.
+		.
+		.
+		AtomType_Closure
+	} type;
+
+	union {
+		.
+		.
+		.
+	} value;
+};
+</pre>
+Since the closure is just a regular list, there is no need to add anything
+to <code>value</code>.
+</p>
+
+<p>
+Like our other atom types, we will create a utility function to
+initialize them. <code>make_closure</code>, unlike the others, performs
+some validation of the arguments and so needs to return an error code.
+</p>
+
+<pre class="c">
+int make_closure(Atom env, Atom args, Atom body, Atom *result)
+{
+	Atom p;
+
+	if (!listp(args) || !listp(body))
+		return Error_Syntax;
+
+	/* Check argument names are all symbols */
+	p = args;
+	while (!nilp(p)) {
+		if (car(p).type != AtomType_Symbol)
+			return Error_Type;
+		p = cdr(p);
+	}
+
+	*result = cons(env, cons(args, body));
+	result->type = AtomType_Closure;
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+Next up is another special case in <code>eval</code> to create a
+closure whenever a lambda expression is encountered.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	.
+	.
+	.
+	if (op.type == AtomType_Symbol) {
+		if (strcmp(op.value.symbol, "QUOTE") == 0) {
+		.
+		.
+		.
+		} else if (strcmp(op.value.symbol, "LAMBDA") == 0) {
+			if (nilp(args) || nilp(cdr(args)))
+				return Error_Args;
+
+			return make_closure(env, car(args), cdr(args), result);
+		}
+	}
+	.
+	.
+	.
+}
+</pre>
+
+<p>
+The body of our <code>SQUARE</code> example above is expressed in terms
+of <code>X</code>. In order to evaluate the body, we need to create a new
+environment with <code>X</code> bound to the value of the argument:
+<pre class="lisp">
+(<i>closure-env</i> (X . 3))
+</pre>
+where the parent environment <code>closure-env</code> is the environment
+that was stored in the closure.
+</p>
+
+<p>
+Finally we extend <code>apply</code> to create the new environment and
+call <code>eval</code> for each expression in the body.
+</p>
+
+<pre class="c">
+int apply(Atom fn, Atom args, Atom *result)
+{
+	Atom env, arg_names, body;
+
+	if (fn.type == AtomType_Builtin)
+		return (*fn.value.builtin)(args, result);
+	else if (fn.type != AtomType_Closure)
+		return Error_Type;
+
+	env = env_create(car(fn));
+	arg_names = car(cdr(fn));
+	body = cdr(cdr(fn));
+
+	/* Bind the arguments */
+	while (!nilp(arg_names)) {
+		if (nilp(args))
+			return Error_Args;
+		env_set(env, car(arg_names), car(args));
+		arg_names = cdr(arg_names);
+		args = cdr(args);
+	}
+	if (!nilp(args))
+		return Error_Args;
+
+	/* Evaluate the body */
+	while (!nilp(body)) {
+		Error err = eval_expr(car(body), env, result);
+		if (err)
+			return err;
+		body = cdr(body);
+	}
+
+	return Error_OK;
+}
+</pre>
+
+<h4>Testing</h4>
+
+<p>
+Let's check that our <code>SQUARE</code> function works as intended.
+</p>
+
+<pre class="lisp">
+&gt; <b>(define square (lambda (x) (* x x)))</b>
+SQUARE
+&gt; <b>(square 3)</b>
+9
+&gt; <b>(square 4)</b>
+16
+</pre>
+
+<p>
+Of course, lambda expressions do not have to be bound to a symbol &mdash;
+we can create <i>anonymous functions</i>.
+</p>
+
+<pre class="lisp">
+&gt; <b>((lambda (x) (- x 2)) 7)</b>
+5
+</pre>
+
+<p>
+Fans of functional programming will be pleased to see that we can now
+do this kind of thing:
+</p>
+
+<pre class="lisp">
+&gt; <b>(define make-adder (lambda (x) (lambda (y) (+ x y))))</b>
+MAKE-ADDER
+&gt; <b>(define add-two (make-adder 2))</b>
+ADD-TWO
+&gt; <b>(add-two 5)</b>
+7
+</pre>
+
+<p>
+Do you know where the value "2" is stored?
+</p>
+
+</body>
+</html>
+

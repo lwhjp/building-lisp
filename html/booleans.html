@@ -1,0 +1,228 @@
+<html>
+<head>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+<link rel="stylesheet" type="text/css" href="style.css" />
+<title>Chapter 8: Booleans and short-circuit evaluation</title>
+</head>
+<body>
+
+<h1>Booleans and short-circuit evaluation</h1>
+
+<h2>Booleans</h2>
+
+<p>
+(Apologies if you are a logician and I've got this all wrong...)
+</p>
+
+<p>
+A <i>boolean</i> value is one of two classes of values which are called
+<i>true</i> and <i>false</i>. If we wish to interpret a value as a boolean,
+we consider it to be <i>true</i> if it is in the class of <i>true</i> values,
+and <i>false</i> otherwise.
+</p>
+
+<h2>Short-circuit evalutaion</h2>
+
+<p>
+So far every expression we pass to <code>eval</code> is evaluated. With
+the exception of special forms such as <code>DEFINE</code> and
+<code>LAMBDA</code>, which store away expressions to be evaluated
+later, <code>eval</code> must walk the whole tree before returning a
+result.
+</p>
+
+<p>
+In this chapter we will define yet another special form <code>IF</code>,
+which will cause <code>eval</code> to choose which of two possible
+expressions to evaluate, and discard the other.
+</p>
+
+<p>
+The syntax is as follows:
+<pre class="lisp">
+(IF <i>test true-expr false-expr</i>)
+</pre>
+where <code>test</code>, <code>true-expr</code> and <code>false-expr</code>
+are arbitrary expressions. If the result of evaluating <code>test</code> is
+considered to be <i>true</i>, then the result of the <code>IF</code>-expression
+is the result of evaluating <code>true-expr</code>, otherwise it is the
+result of evaluating <code>false-expr</code>. Only one of
+<code>true-expr</code> and <code>false-expr</code> is evaluated; the
+other expression is ignored.
+</p>
+
+<p>
+But what kind of value is <i>true</i>? In our environment we will define
+<code>NIL</code> to be <i>false</i>. Any other value is <i>true</i>.
+</p>
+
+<p>
+Here is the code to handle IF-expressions.
+</p>
+
+<pre class="c">
+int eval_expr(Atom expr, Atom env, Atom *result)
+{
+	.
+	.
+	.
+	if (op.type == AtomType_Symbol) {
+		if (strcmp(op.value.symbol, "QUOTE") == 0) {
+		.
+		.
+		.
+		} else if (strcmp(op.value.symbol, "IF") == 0) {
+			Atom cond, val;
+
+			if (nilp(args) || nilp(cdr(args)) || nilp(cdr(cdr(args)))
+					|| !nilp(cdr(cdr(cdr(args)))))
+				return Error_Args;
+
+			err = eval_expr(car(args), env, &amp;cond);
+			if (err)
+				return err;
+
+			val = nilp(cond) ? car(cdr(cdr(args))) : car(cdr(args));
+			return eval_expr(val, env, result);
+		}
+	}
+	.
+	.
+	.
+}
+</pre>
+
+<p>
+The argument check is getting a little unwieldy. A couple of alternatives
+are to modify <code>car</code> and <code>cdr</code> to return
+<code>NIL</code> if the argument is not a pair and forego the syntax
+check, or to create a helper function to count the list length. It won't
+get any worse than this, though &mdash; so let's not waste time on it.
+</p>
+
+<p>
+Traditionally LISP functions return the symbol <code>T</code> if they
+need to return a boolean value and there is no obvious object available.
+<code>T</code> is bound to itself, so evaluating it returns the symbol
+<code>T</code> again. A symbol is not <code>NIL</code>, and so is
+<i>true</i>.
+</p>
+
+<p>
+Add a binding for <code>T</code> to the initial environment:
+<pre class="c">
+env_set(env, make_sym("T"), make_sym("T"));
+</pre>
+Remember that <code>make_sym</code> will return the <em>same</em>
+symbol object if it is called multiple times with identical strings.
+</p>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(if t 3 4)</b>
+3
+&gt; <b>(if nil 3 4)</b>
+4
+&gt; <b>(if 0 t nil)</b>
+T
+</pre>
+
+<p>
+Unlike C, zero is <i>true</i>, not <i>false</i>.
+</p>
+
+<h2>Predicates</h2>
+
+<p>
+While we could stop here, it would be useful to make some tests other
+than "is it <code>NIL</code>". This is where <i>predicates</i> come in.
+A predicate is a function which returns a true/false value according to
+some condition.
+</p>
+
+<p>
+We will define two built-in predicates, "<code>=</code>" which tests for
+numerical equality, and "<code>&lt;</code>" which tests if one number
+is less than another.
+</p>
+
+<p>
+The functions are similar to our other numerical built-ins.
+</p>
+
+<pre class="c">
+int builtin_numeq(Atom args, Atom *result)
+{
+	Atom a, b;
+
+	if (nilp(args) || nilp(cdr(args)) || !nilp(cdr(cdr(args))))
+		return Error_Args;
+
+	a = car(args);
+	b = car(cdr(args));
+
+	if (a.type != AtomType_Integer || b.type != AtomType_Integer)
+		return Error_Type;
+
+	*result = (a.value.integer == b.value.integer) ? make_sym("T") : nil;
+
+	return Error_OK;
+}
+</pre>
+
+<p>
+<code>builtin_less</code> follows the same pattern and is not shown here.
+</p>
+
+<p>
+Finally we must add them to the initial environment.
+</p>
+
+<pre class="c">
+env_set(env, make_sym("="), make_builtin(builtin_numeq));
+env_set(env, make_sym("<"), make_builtin(builtin_less));
+</pre>
+
+<h4>Testing</h4>
+
+<pre class="lisp">
+&gt; <b>(= 3 3)</b>
+T
+&gt; <b>(&lt; 11 4)</b>
+NIL
+</pre>
+
+<p>
+Barring memory and stack limitations, our LISP environment is now
+Turing-complete! If you have been entering the code as we go along, you
+can confirm that we have implemented the core of a usable programming
+language in well under 1,000 lines of C code.
+</p>
+
+<p>
+A classic demonstration:
+<pre class="lisp">
+&gt; <b>(define fact
+    (lambda (x)
+      (if (= x 0)
+        1
+        (* x (fact (- x 1))))))</b>
+FACT
+&gt; <b>(fact 10)</b>
+3628800
+</pre>
+I have cheated a little here: the REPL does not allow the user to enter
+multi-line expressions, so you must enter the definition for
+<code>fact</code> all on one line.
+</p>
+
+<p>
+There is more to do yet, though. LISP has other features which make it
+possible to express some really interesting stuff, and there are a few loose
+ends to tidy up as well.
+</p>
+
+</body>
+</html>
+
