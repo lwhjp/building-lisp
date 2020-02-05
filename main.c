@@ -16,11 +16,12 @@ char *slurp(const char *path)
 	len = ftell(file);
 	fseek(file, 0, SEEK_SET);
 
-	buf = malloc(len);
+	buf = malloc(len + 1);
 	if (!buf)
 		return NULL;
 
 	fread(buf, 1, len, file);
+	buf[len] = 0;
 	fclose(file);
 
 	return buf;
