@@ -6,7 +6,7 @@ LDFLAGS=-lreadline
 objects=$(sources:.c=.o)
 
 lisp: $(objects)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(objects): $(wildcard *.h)
 
