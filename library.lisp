@@ -45,7 +45,7 @@
   (if (pair? x)
       (if (eq? (car x) 'unquote)
           (cadr x)
-          (if (eq? (caar x) 'unquote-splicing)
+          (if (eq? (if (pair? (car x)) (caar x) nil) 'unquote-splicing)
               (list 'append
                     (cadr (car x))
                     (list 'quasiquote (cdr x)))
@@ -196,4 +196,3 @@
 (define (not x) (if x nil t))
 
 (define (null? x) (not x))
-
