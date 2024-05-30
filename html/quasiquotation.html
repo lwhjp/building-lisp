@@ -174,7 +174,7 @@ And now the macro itself:
   (if (pair? x)
       (if (eq? (car x) 'unquote)
           (cadr x)
-          (if (eq? (caar x) 'unquote-splicing)
+          (if (eq? (if (pair? (car x)) (caar x) nil) 'unquote-splicing)
               (list 'append
                     (cadr (car x))
                     (list 'quasiquote (cdr x)))
