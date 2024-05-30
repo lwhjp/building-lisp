@@ -5,10 +5,12 @@ int builtin_car(Atom args, Atom *result)
 	if (nilp(args) || !nilp(cdr(args)))
 		return Error_Args;
 
-	if (car(args).type == AtomType_Pair)
-		*result = car(car(args));
-	else
+	if (nilp(car(args)))
 		*result = nil;
+	else if (car(args).type != AtomType_Pair)
+		return Error_Type;
+	else
+		*result = car(car(args));
 
 	return Error_OK;
 }
@@ -18,10 +20,12 @@ int builtin_cdr(Atom args, Atom *result)
 	if (nilp(args) || !nilp(cdr(args)))
 		return Error_Args;
 
-	if (car(args).type == AtomType_Pair)
-		*result = cdr(car(args));
-	else
+	if (nilp(car(args)))
 		*result = nil;
+	else if (car(args).type != AtomType_Pair)
+		return Error_Type;
+	else
+		*result = cdr(car(args));
 
 	return Error_OK;
 }
